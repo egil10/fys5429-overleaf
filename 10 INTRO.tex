@@ -1,0 +1,81 @@
+\section{Introduction}\label{section:Introduction}
+
+This is an intro lorem ipsum with a reference \textcite{hastie} and such \parencite{hastie}. 
+
+The classical starting point for many partial differential equation (PDE) methods in mathematical finance is the heat equation, which describes the diffusion of temperature in a homogeneous medium. In one spatial dimension, the heat equation is given by
+\[
+\frac{\partial u}{\partial t}(x,t)
+=
+\alpha
+\frac{\partial^2 u}{\partial x^2}(x,t),
+\]
+where $u(x,t)$ represents temperature, $t$ denotes time, $x$ is the spatial coordinate, and $\alpha > 0$ is the thermal diffusivity constant. The equation states that the rate of change in temperature is proportional to the spatial curvature of the temperature field, capturing the fundamental mechanism of diffusion.
+
+The importance of the heat equation in option pricing arises from the fact that the Black--Scholes PDE can be transformed into a diffusion equation of this form through a suitable change of variables.
+
+Under the standard geometric Brownian motion model for an asset price $S_t$,
+\[
+dS_t = \mu S_t dt + \sigma S_t dW_t,
+\]
+the value $V(S,t)$ of a European option satisfies the Black--Scholes PDE
+\[
+\frac{\partial V}{\partial t}
++
+\frac{1}{2}\sigma^2 S^2 \frac{\partial^2 V}{\partial S^2}
++
+rS \frac{\partial V}{\partial S}
+-
+rV
+=
+0.
+\]
+
+By introducing the log-price transformation
+\[
+x = \ln\left(\frac{S}{K}\right),
+\quad
+\tau = T - t,
+\]
+together with an exponential rescaling of the dependent variable, the Black--Scholes equation can be reduced to the standard diffusion equation
+\[
+\frac{\partial u}{\partial \tau}
+=
+\frac{\partial^2 u}{\partial x^2}.
+\]
+
+This connection provides both analytical insight and a natural bridge to modern numerical approaches. In this thesis, Physics-Informed Neural Networks (PINNs) are used to solve the Black--Scholes PDE by embedding the governing differential equation directly into the loss function, allowing neural networks to approximate option prices while respecting the underlying diffusion structure inherited from the heat equation.
+
+While the Black--Scholes model assumes constant volatility, empirical financial markets exhibit stochastic volatility dynamics. A widely used extension is the Heston stochastic volatility model, in which both the asset price and its variance evolve as stochastic processes:
+\[
+dS_t = r S_t dt + \sqrt{v_t}\, S_t dW_t^S,
+\]
+\[
+dv_t = \kappa(\theta - v_t)dt + \xi \sqrt{v_t}\, dW_t^v,
+\]
+with correlation
+\[
+dW_t^S dW_t^v = \rho dt.
+\]
+
+In this setting, the option price becomes a function $V(S,v,t)$ and satisfies the two-dimensional Heston PDE
+\[
+\frac{\partial V}{\partial t}
++
+\frac{1}{2} v S^2 \frac{\partial^2 V}{\partial S^2}
++
+\rho \xi v S \frac{\partial^2 V}{\partial S \partial v}
++
+\frac{1}{2} \xi^2 v \frac{\partial^2 V}{\partial v^2}
+\]
+\[
++ \quad 
+rS \frac{\partial V}{\partial S}
++
+\kappa(\theta - v)\frac{\partial V}{\partial v}
+-
+rV
+=
+0.
+\]
+
+Compared to the Black--Scholes equation, the Heston PDE introduces an additional spatial dimension and a mixed derivative term, making classical numerical solution methods more computationally demanding. This increased complexity makes the model particularly well-suited for physics-informed machine learning approaches. In this thesis, PINNs are therefore applied not only to the Black--Scholes equation but also to the Heston PDE, demonstrating how neural-network-based solvers can handle higher-dimensional option pricing problems governed by diffusion-type equations.
