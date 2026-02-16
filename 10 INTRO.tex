@@ -79,3 +79,78 @@ rV
 \]
 
 Compared to the Black--Scholes equation, the Heston PDE introduces an additional spatial dimension and a mixed derivative term, making classical numerical solution methods more computationally demanding. This increased complexity makes the model particularly well-suited for physics-informed machine learning approaches. In this thesis, PINNs are therefore applied not only to the Black--Scholes equation but also to the Heston PDE, demonstrating how neural-network-based solvers can handle higher-dimensional option pricing problems governed by diffusion-type equations.
+
+
+\subsection{Black Scholes}
+
+\textcite{abdelmessih2026visualoptions}.
+
+\[
+S\frac{\partial V}{\partial S} + \frac{\partial V}{\partial t} + \frac{1}{2} \sigma^2 S^2\frac{\partial^2V}{\partial S^2} = V
+\]
+
+\[
+\frac{\partial V}{\partial t} + \frac{1}{2} \sigma^2 S^2\frac{\partial^2V}{\partial S^2} = rV - rS\frac{\partial V}{\partial S}
+\]
+
+\[
+d_1 = \frac{\ln(S/K) + (r + \tfrac{1}{2}\sigma^2)T}{\sigma\sqrt{T}}
+\]
+
+\[
+d_2 = d_1 - \sigma\sqrt{T}
+\]
+
+Where:
+\begin{itemize}
+\item $S$ = stock price
+\item $K$ = strike price
+\item $r$ = risk-free rate
+\item $\sigma$ = volatility
+\item $T$ = time to maturity
+\item $N(\cdot)$ = standard normal CDF
+\item $\phi(\cdot)$ = standard normal PDF
+\end{itemize}
+
+Call option:
+\[
+C = S N(d_1) - K e^{-rT} N(d_2)
+\]
+
+Put option:
+\[
+P = K e^{-rT} N(-d_2) - S N(-d_1)
+\]
+
+
+\[
+\Delta = \frac{\partial V}{\partial S}
+\]
+
+\[
+\Gamma = \frac{\partial^2 V}{\partial S^2}
+\]
+
+\[
+\Theta = \frac{\partial V}{\partial t}
+\]
+
+\[
+\text{Vega} = \frac{\partial V}{\partial \sigma}
+\]
+
+\[
+\rho = \frac{\partial V}{\partial r}
+\]
+
+\section*{Black--Scholes Equation in Greek Form}
+
+\[
+\Theta + \frac{1}{2}\sigma^2 S^2 \Gamma
++ rS\Delta - rV = 0
+\]
+
+\[
+\Theta + \frac{1}{2}\sigma^2 S^2 \Gamma
+= r(V - S\Delta)
+\]
