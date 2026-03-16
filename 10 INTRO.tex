@@ -122,26 +122,31 @@ Put option:
 P = K e^{-rT} N(-d_2) - S N(-d_1)
 \]
 
-
-\[
-\Delta = \frac{\partial V}{\partial S}
-\]
-
-\[
-\Gamma = \frac{\partial^2 V}{\partial S^2}
-\]
-
-\[
-\Theta = \frac{\partial V}{\partial t}
-\]
-
-\[
-\text{Vega} = \frac{\partial V}{\partial \sigma}
-\]
-
-\[
-\rho = \frac{\partial V}{\partial r}
-\]
+\begin{align}
+    \Delta &= \frac{\partial V}{\partial S} 
+    & \hfill  
+    \text{Vega} &= \frac{\partial V}{\partial \sigma} 
+    \\
+    \Theta &= \frac{\partial V}{\partial t}   
+    & \hfill 
+    \rho &= \frac{\partial V}{\partial r}
+    \\
+    \Gamma &= \frac{\partial^2 V}{\partial S^2} 
+    & \hfill 
+    \text{Vomma} &= \frac{\partial^2 V}{\partial\sigma^2}
+    \\
+    \text{Vanna} &= \frac{\partial^2 V}{\left( \partial S \partial \sigma  \right)}
+    & \hfill 
+    \text{Charm} &= \frac{\partial^2 V}{\left( \partial S \partial t \right)}
+    \\
+    \text{Speed} &= \frac{\partial^3 V}{\partial S^3} 
+    & \hfill 
+    \text{Zomma} &= \frac{\partial^3 V}{\left( \partial S^2 \partial \sigma \right)}
+    \\
+    \Phi &= \frac{\partial V}{\partial q} 
+    & \hfill 
+    \text{Color} &= \frac{\partial^3 V}{(\partialS^2\partial t)}
+\end{align}
 
 \section*{Black--Scholes Equation in Greek Form}
 
