@@ -6,7 +6,9 @@ This section summarizes the current state of the project and outlines the planne
 
 A substantial portion of the early project work has gone into reading, orientation, and conceptual groundwork. Coming from a background in finance, a central early question was one of feasibility: whether a physics-informed approach could handle the specific structure of financial PDEs in a way that adds genuine value over existing analytical or numerical methods.
 
-This led to a careful study of the model hierarchy underlying the project. The Black--Scholes model, despite its well-known limitations, remains the natural entry point: its PDE has an exact analytical solution, which makes it an ideal testbed for verifying that a PINN solver learns the right structure. Moving from constant to stochastic volatility via the Heston model introduces a two-dimensional, time-dependent PDE with a coupled variance process and no simple closed form---a setting where mesh-free, data-driven methods become genuinely attractive. The natural further extension is the inverse problem: rather than pricing given a fixed set of parameters, one asks what parameter values are consistent with observed market prices. This is the calibration problem, and it is here that the PINN framework may offer the most practical value.
+This led to a careful study of the model hierarchy underlying the project. The Black--Scholes model, despite its well-known limitations, remains the natural entry point: its PDE has an exact analytical solution, which makes it an ideal testbed for verifying that a PINN solver learns the right structure. 
+
+Moving from constant to stochastic volatility via the Heston model introduces a two-dimensional, time-dependent PDE with a coupled variance process and no simple closed form---a setting where mesh-free, data-driven methods become genuinely attractive. The natural further extension is the inverse problem: rather than pricing given a fixed set of parameters, one asks what parameter values are consistent with observed market prices. This is the calibration problem, and it is here that the PINN framework may offer the most practical value.
 
 In parallel with this conceptual work, exploratory code has been written to generate option price surfaces under both models, experiment with collocation point sampling, and build intuition for the relevant parameter regimes. The introduction and methods sections of this document reflect the theoretical synthesis carried out during this phase.
 
@@ -14,26 +16,28 @@ In parallel with this conceptual work, exploratory code has been written to gene
 
 The remaining work follows naturally from the model hierarchy established above.
 
-\subsubsection*{Phase 1 --- Black--Scholes Forward Problem}
+\textit{Phase 1 --- Black--Scholes Forward Problem}
 
 Implement and validate a PINN solver for the one-dimensional Black--Scholes PDE. The network is trained on collocation points in the $(S,t)$ domain, with the terminal payoff and boundary conditions enforced through the composite loss in \cref{eq:pinn_loss}. Prices and first-order Greeks ($\Delta$, $\Theta$) are compared against the analytical solution as a primary quality check.
 
-\subsubsection*{Phase 2 --- Activation Function Study}
+\textit{Phase 2 --- Activation Function Study}
 
 Systematically compare smooth activation functions (\texttt{tanh}, Swish, GELU, Softplus, SIREN) on the Black--Scholes problem, evaluating convergence speed and accuracy of second-order Greeks ($\Gamma$, Vomma). This phase is primarily experimental and is expected to yield concrete guidance on architecture choices for the more demanding Heston problem.
 
-\subsubsection*{Phase 3 --- Heston Forward Problem}
+\textit{Phase 3 --- Heston Forward Problem}
 
 Extend the PINN framework to the two-dimensional Heston PDE over $(S, v, t)$. The additional complexity of the mixed derivative term $\partial^2 V/\partial S\,\partial v$ and the Feller boundary condition on the variance process is addressed here. Results are compared to a reference finite-difference or Monte Carlo solution.
 
-\subsubsection*{Phase 4 --- Inverse Problem and Calibration}
+\textit{Phase 4 --- Inverse Problem and Calibration}
 
 Formulate the calibration problem as an inverse PINN: infer the Heston parameters $(\kappa, \theta, \xi, \rho, v_0)$ from observed option prices by augmenting the PINN loss with a data-fit term. Experiments are run on both synthetic and, if feasible, real market data.
 
-\subsubsection*{Phase 5 --- Write-up and Submission}
+\textit{Phase 5 --- Write-up and Submission}
 
 Complete the results section with figures and tables. Write the conclusion, connecting findings back to the research questions. Final proof-read, bibliography check, and submission.
 
-\subsection*{Key Risks}
+\textbf{Key Risks}
 
 Training stability is the main practical concern: PINN losses for financial PDEs can be poorly conditioned due to the wide range of option values across the domain. Loss weighting and adaptive sampling strategies may be required. The calibration phase is the most experimental part of the project and may be simplified if the forward Heston solver proves insufficiently accurate.
+
+\textbf{Note:} Below is the current template and outline of the report, with more to come. 
