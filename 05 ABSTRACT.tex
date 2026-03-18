@@ -1,0 +1,7 @@
+\begin{center}
+{\large\bfseries Abstract}
+\end{center}
+
+This project investigates the use of Physics-Informed Neural Networks (PINNs) for solving and calibrating option pricing models in quantitative finance. We begin with the Black--Scholes partial differential equation (PDE), demonstrating how its equivalence to the heat equation motivates a PINN-based solver that embeds the governing differential operator directly into the training loss. The neural network is trained to satisfy both the PDE residual and the terminal payoff condition, and its prices and Greeks are compared against the known analytical solution. We then extend the framework to the Heston stochastic volatility model, which introduces a higher-dimensional PDE with a mixed derivative term and no simple closed-form solution. The PINN approach is shown to scale naturally to this setting. We further explore the use of PINNs for the inverse calibration problem: inferring Heston model parameters from observed option prices. The results illustrate the promise of physics-informed machine learning as a flexible, mesh-free solver for financial PDEs, while also exposing practical challenges related to training stability and loss balancing in multi-dimensional settings.
+
+\vspace{2em}
