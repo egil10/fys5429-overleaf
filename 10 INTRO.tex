@@ -1,7 +1,5 @@
 \section{Introduction}\label{section:Introduction}
 
-This is an intro lorem ipsum with a reference \textcite{hastie} and such \parencite{hastie}. 
-
 The classical starting point for many partial differential equation (PDE) methods in mathematical finance is the heat equation, which describes the diffusion of temperature in a homogeneous medium. In one spatial dimension, the heat equation is given by
 \[
 \frac{\partial u}{\partial t}(x,t)
@@ -81,81 +79,50 @@ rV
 Compared to the Black--Scholes equation, the Heston PDE introduces an additional spatial dimension and a mixed derivative term, making classical numerical solution methods more computationally demanding. This increased complexity makes the model particularly well-suited for physics-informed machine learning approaches. In this thesis, PINNs are therefore applied not only to the Black--Scholes equation but also to the Heston PDE, demonstrating how neural-network-based solvers can handle higher-dimensional option pricing problems governed by diffusion-type equations.
 
 
-\subsection{Black Scholes}
+\subsection{The Black--Scholes Model}\label{subsection:bs}
 
-\textcite{abdelmessih2026visualoptions}.
-
+The Black--Scholes model \parencite{abdelmessih2026visualoptions} prices a European call or put option analytically under the assumption of constant volatility. Given the log-moneyness variables $d_1$ and $d_2$,
 \[
-S\frac{\partial V}{\partial S} + \frac{\partial V}{\partial t} + \frac{1}{2} \sigma^2 S^2\frac{\partial^2V}{\partial S^2} = V
+d_1 = \frac{\ln(S/K) + (r + \tfrac{1}{2}\sigma^2)T}{\sigma\sqrt{T}},
+\quad
+d_2 = d_1 - \sigma\sqrt{T},
 \]
-
+the call and put prices are
 \[
-\frac{\partial V}{\partial t} + \frac{1}{2} \sigma^2 S^2\frac{\partial^2V}{\partial S^2} = rV - rS\frac{\partial V}{\partial S}
+C = S N(d_1) - K e^{-rT} N(d_2),
 \]
-
 \[
-d_1 = \frac{\ln(S/K) + (r + \tfrac{1}{2}\sigma^2)T}{\sigma\sqrt{T}}
+P = K e^{-rT} N(-d_2) - S N(-d_1),
 \]
+where $S$ is the current asset price, $K$ the strike, $r$ the risk-free rate, $\sigma$ the volatility, $T$ the time to maturity, and $N(\cdot)$ the standard normal CDF.
 
+\subsubsection*{The Greeks}
+
+The sensitivity of the option price to its inputs — the Greeks — are partial derivatives of $V$ with respect to market and model parameters. The first- and second-order Greeks are summarized in \cref{table:greeks}, together with selected third-order Greeks. The Black--Scholes PDE can be written compactly in terms of the first- and second-order Greeks as
 \[
-d_2 = d_1 - \sigma\sqrt{T}
+\Theta + \frac{1}{2}\sigma^2 S^2 \Gamma + rS\Delta - rV = 0,
 \]
+which makes explicit that the time decay $\Theta$ is balanced by gamma and delta exposure.
 
-Where:
-\begin{itemize}
-\item $S$ = stock price
-\item $K$ = strike price
-\item $r$ = risk-free rate
-\item $\sigma$ = volatility
-\item $T$ = time to maturity
-\item $N(\cdot)$ = standard normal CDF
-\item $\phi(\cdot)$ = standard normal PDF
-\end{itemize}
-
-Call option: 
-\[
-C = S N(d_1) - K e^{-rT} N(d_2)
-\]
-
-Put option:
-\[
-P = K e^{-rT} N(-d_2) - S N(-d_1)
-\]
-
-\begin{align}
-    \Delta &= \frac{\partial V}{\partial S} 
-    & \hfill  
-    \text{Vega} &= \frac{\partial V}{\partial \sigma} 
-    \\
-    \Theta &= \frac{\partial V}{\partial t}   
-    & \hfill 
-    \rho &= \frac{\partial V}{\partial r}
-    \\
-    \Gamma &= \frac{\partial^2 V}{\partial S^2} 
-    & \hfill 
-    \text{Vomma} &= \frac{\partial^2 V}{\partial\sigma^2}
-    \\
-    \text{Vanna} &= \frac{\partial^2 V}{\left( \partial S \partial \sigma  \right)}
-    & \hfill 
-    \text{Charm} &= \frac{\partial^2 V}{\left( \partial S \partial t \right)}
-    \\
-    \text{Speed} &= \frac{\partial^3 V}{\partial S^3} 
-    & \hfill 
-    \text{Zomma} &= \frac{\partial^3 V}{\left( \partial S^2 \partial \sigma \right)}
-    \\
-    \Phi &= \frac{\partial V}{\partial q} 
-    & \hfill 
-    \text{Color} &= \frac{\partial^3 V}{(\partialS^2\partial t)}
-\end{align}
-
-\section*{Black--Scholes Equation in Greek Form}
-
-\[
-\Theta + \frac{1}{2}\sigma^2 S^2 \Gamma
-+ rS\Delta - rV = 0
-\]
-
-\[
-\Theta + \frac{1}{2}\sigma^2 S^2 \Gamma
-= r(V - S\Delta)
-\]
+\begin{table}[h]
+\centering
+\caption{Selected Black--Scholes Greeks.}\label{table:greeks}
+\begin{tabular}{lll}
+\toprule
+Greek & Expression & Order \\
+\midrule
+$\Delta$ & $\partial V/\partial S$ & 1st \\
+$\Theta$ & $\partial V/\partial t$ & 1st \\
+$\rho$ & $\partial V/\partial r$ & 1st \\
+$\Phi$ & $\partial V/\partial q$ & 1st \\
+Vega & $\partial V/\partial \sigma$ & 1st \\
+$\Gamma$ & $\partial^2 V/\partial S^2$ & 2nd \\
+Vomma & $\partial^2 V/\partial\sigma^2$ & 2nd \\
+Vanna & $\partial^2 V/\partial S\,\partial\sigma$ & 2nd \\
+Charm & $\partial^2 V/\partial S\,\partial t$ & 2nd \\
+Speed & $\partial^3 V/\partial S^3$ & 3rd \\
+Zomma & $\partial^3 V/\partial S^2\,\partial\sigma$ & 3rd \\
+Color & $\partial^3 V/\partial S^2\,\partial t$ & 3rd \\
+\bottomrule
+\end{tabular}
+\end{table}

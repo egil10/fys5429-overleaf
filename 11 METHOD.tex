@@ -1,12 +1,10 @@
 \section{Methods}\label{section:methods}
 
-This is the methods section, lorem ipsum.
+This section develops the methodological framework for the project. We first review the connection between maximum likelihood estimation and mean squared error as the natural training objective for neural networks. We then describe the Physics-Informed Neural Network (PINN) architecture and its application to the Black--Scholes and Heston PDEs.
 
-Modern quantitative finance sits at the intersection of stochastic modeling, numerical methods, and machine learning. Classical stochastic volatility modeling builds on multiscale diffusion techniques, where volatility evolves on multiple time scales, as described by \textcite{fouque2011multiscale}. Analytical approaches to option pricing under stochastic dynamics are further developed in tractable model frameworks such as those presented in \textcite{gulisashvili2012analytically}, while probabilistic interpretations of derivative pricing link option values to risk-neutral expectations \parencite{optionsprobabilities}. 
+Modern quantitative finance sits at the intersection of stochastic modeling, numerical methods, and machine learning. Classical stochastic volatility modeling builds on multiscale diffusion techniques, where volatility evolves on multiple time scales \parencite{fouque2011multiscale}. Analytical approaches to option pricing under stochastic dynamics are further developed in tractable model frameworks \parencite{gulisashvili2012analytically}, while probabilistic interpretations of derivative pricing link option values to risk-neutral expectations \parencite{optionsprobabilities}. Foundational deep learning theory and architectures are presented in \textcite{goodfellow2016deep}, while practical implementations using modern software frameworks are discussed in \textcite{raschka2022ml}. Together, these perspectives motivate physics-informed machine learning methods for solving option pricing problems governed by PDEs.
 
-In parallel, machine learning methods have become increasingly relevant for solving high-dimensional approximation problems arising from partial differential equations and financial data modeling. Foundational deep learning theory and architectures are presented in \textcite{goodfellow2016deep}, while practical implementations using modern software frameworks are discussed in \textcite{raschka2022ml}. Reinforcement learning methods provide an additional computational paradigm for sequential decision-making and dynamic optimization problems in finance \parencite{sutton2018rl}. Finally, time-change techniques offer an alternative stochastic modeling framework that connects diffusion processes with subordinated dynamics in financial markets, as discussed in \textcite{swishchuk2008time}. Together, these perspectives motivate the use of physics-informed machine learning methods for solving option pricing problems governed by stochastic differential equations and partial differential equations.
-
-\subsection{From Maximum Likelihood to Mean Squared Error}
+\subsection{From Maximum Likelihood to Mean Squared Error}\label{subsection:mle2mse}
 
 \begin{equation}
     P(y \mid x;w) = \frac{1}{\sqrt{2\pi\sigma^2}} \exp{\left( -\frac{(y-\hat{y})^2}{2\sigma^2}\right)} 
@@ -24,4 +22,36 @@ In parallel, machine learning methods have become increasingly relevant for solv
     \text{Minimize:} \sum_{i=1}^{n}(y_i-\hat{y}_i)^2
 \end{equation}
 
+Assuming Gaussian noise on the targets and maximizing the log-likelihood is therefore equivalent to minimizing the mean squared error. This justifies MSE as the standard regression loss for neural networks, and it is the starting point for the composite PINN loss described below.
+
+\subsection{Physics-Informed Neural Networks}\label{subsection:pinn}
+
+A Physics-Informed Neural Network (PINN) is a neural network $\hat{V}_\theta(S, t)$ trained to satisfy both observed data and the residual of a governing PDE. Rather than discretizing the domain on a mesh, the PDE is enforced at a set of collocation points sampled from the interior and boundaries of the domain. The total loss is a weighted sum of three terms:
+\begin{equation}\label{eq:pinn_loss}
+    \mathcal{L}(\theta)
+    = \lambda_\text{pde}\,\mathcal{L}_\text{pde}
+    + \lambda_\text{bc}\,\mathcal{L}_\text{bc}
+    + \lambda_\text{ic}\,\mathcal{L}_\text{ic},
+\end{equation}
+where
+\begin{align}
+    \mathcal{L}_\text{pde} &= \frac{1}{N_r}\sum_{i=1}^{N_r}\bigl|\mathcal{F}[\hat{V}_\theta](S_i,t_i)\bigr|^2, \\
+    \mathcal{L}_\text{bc}  &= \frac{1}{N_b}\sum_{i=1}^{N_b}\bigl|\hat{V}_\theta(S_i^b,t_i^b) - V_b\bigr|^2, \\
+    \mathcal{L}_\text{ic}  &= \frac{1}{N_0}\sum_{i=1}^{N_0}\bigl|\hat{V}_\theta(S_i,T) - \max(S_i-K,0)\bigr|^2.
+\end{align}
+Here $\mathcal{F}[\hat{V}_\theta]$ denotes the PDE operator applied to the network output (the residual), $V_b$ encodes the boundary conditions (e.g., $V(0,t)=0$ and $V(S,t)\to S$ as $S\to\infty$ for a call), and the initial condition enforces the terminal payoff at $t=T$. The partial derivatives required to evaluate $\mathcal{F}$ are computed via automatic differentiation \parencite{goodfellow2016deep}.
+
+For the Black--Scholes PDE the residual is
+\[
+    \mathcal{F}[\hat{V}]
+    = \frac{\partial \hat{V}}{\partial t}
+    + \frac{1}{2}\sigma^2 S^2 \frac{\partial^2 \hat{V}}{\partial S^2}
+    + rS\frac{\partial \hat{V}}{\partial S}
+    - r\hat{V}.
+\]
+For the Heston PDE the residual extends to two spatial dimensions $(S, v)$, introducing an additional variance dimension and a mixed derivative term.
+
+\subsection{Activation Functions}\label{subsection:activation}
+
+The choice of activation function affects both the expressivity of the network and the quality of the automatic-differentiation graph used to compute PDE residuals. Standard choices such as ReLU are not suitable for PINNs because they yield zero second derivatives almost everywhere. The hyperbolic tangent $\tanh(z)$ is a natural choice: it is smooth, bounded, and its derivatives are analytically well-behaved, which is important when the loss includes second-order terms such as $\Gamma = \partial^2 V/\partial S^2$. Other smooth activations — Swish, GELU, Softplus, Sine (SIREN) — will also be explored and compared.
 
