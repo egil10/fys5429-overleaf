@@ -2,33 +2,3 @@
 
 % To be written once results are available.
 
-\section{Progress and Roadmap}\label{section:roadmap}
-
-This section summarizes the current state of the project and outlines the planned work for the remaining time before the submission deadline of June 1, 2026.
-
-\subsection*{Current Status (March 2026)}
-
-The theoretical foundation of the project is in place. The introduction covers the Black--Scholes PDE and its connection to the heat equation, the Heston stochastic volatility model, and the motivation for physics-informed approaches. The methods section establishes the PINN loss formulation, the MSE–likelihood connection, and the rationale for activation function selection. No numerical experiments have been run yet; the results and conclusion sections are pending implementation.
-
-\subsection*{Milestones}
-
-\begin{description}
-    \item[Phase 1 --- Black--Scholes PINN (March 21 -- April 4)]
-    Implement a PINN solver for the one-dimensional Black--Scholes PDE in PyTorch. Train on collocation points in the $(S,t)$ domain and enforce the terminal payoff and boundary conditions through the composite loss in \cref{eq:pinn_loss}. Validate option prices and first-order Greeks ($\Delta$, $\Theta$) against the analytical Black--Scholes formula.
-
-    \item[Phase 2 --- Activation Function Study (April 4 -- April 18)]
-    Systematically compare smooth activation functions (\texttt{tanh}, Swish, GELU, Softplus, SIREN/Sine) on the Black--Scholes problem. Evaluate convergence speed, final loss, and accuracy of second-order Greeks ($\Gamma$, Vomma). Produce summary tables and convergence plots.
-
-    \item[Phase 3 --- Heston PINN (April 18 -- May 9)]
-    Extend the PINN framework to the two-dimensional Heston PDE over $(S, v, t)$. Address the additional challenges of the mixed derivative term $\partial^2 V/\partial S\,\partial v$ and the Feller boundary condition on the variance process. Compare results to a reference finite-difference or Monte Carlo solution.
-
-    \item[Phase 4 --- Calibration (May 9 -- May 23)]
-    Formulate the inverse problem: infer the Heston parameters $(\kappa, \theta, \xi, \rho, v_0)$ from a set of observed option prices by minimizing a data-fit term added to the PINN loss. Experiment with both synthetic and real market data.
-
-    \item[Phase 5 --- Write-up and Submission (May 23 -- June 1)]
-    Complete the results section with figures and tables. Write the conclusion, connecting findings back to the research questions. Final proof-read, bibliography check, and submission.
-\end{description}
-
-\subsection*{Key Risks}
-
-Training stability is the main practical concern: PINN losses for financial PDEs can be poorly conditioned due to the wide range of option values across the domain. Loss weighting and adaptive sampling strategies may be needed. The Heston calibration phase is the most experimental part of the project and may be descoped or simplified if the forward solver proves insufficiently accurate.
