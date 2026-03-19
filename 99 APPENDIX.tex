@@ -4,26 +4,44 @@
 
 \begin{figure}[H]
     \centering
-    \includegraphics[width=0.49\textwidth]{figures/bs_surface_comparison.pdf}
-    \includegraphics[width=0.49\textwidth]{figures/bs_error_map.pdf}
-    \caption{Comparison between analytical Black--Scholes solution and PINN approximation (left), with corresponding error surface (right).}
-    \label{fig:bs_surface_error}
+    \includegraphics[width=0.9\textwidth]{figures/bs_surface_comparison.pdf}
+    \caption{Comparison between analytical Black--Scholes solution and PINN approximation.}
+    \label{fig:bs_surface_comparison}
 \end{figure}
 
 \begin{figure}[H]
     \centering
-    \includegraphics[width=0.49\textwidth]{figures/bs_slices.pdf}
-    \includegraphics[width=0.49\textwidth]{figures/bs_loss.pdf}
-    \caption{Cross-sectional slices of the solution (left) and training loss evolution of the PINN (right).}
-    \label{fig:bs_slices_loss}
+    \includegraphics[width=0.9\textwidth]{figures/bs_error_map.pdf}
+    \caption{Corresponding error surface for the PINN approximation.}
+    \label{fig:bs_error_map}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.9\textwidth]{figures/bs_slices.pdf}
+    \caption{Cross-sectional slices of the solution.}
+    \label{fig:bs_slices}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.9\textwidth]{figures/bs_loss.pdf}
+    \caption{Training loss evolution of the PINN.}
+    \label{fig:bs_loss}
 \end{figure}
 
 \subsection{Greeks Analysis}
 
 \begin{figure}[H]
     \centering
-    \includegraphics[width=0.49\textwidth]{figures/bs_greeks.pdf}
-    \includegraphics[width=0.49\textwidth]{figures/bs_greeks_all.pdf}
-    \caption{Estimated option Greeks from the PINN model (left) and full Greeks comparison across methods (right).}
+    \includegraphics[width=0.9\textwidth]{figures/bs_greeks.pdf}
+    \caption{Estimated option Greeks from the PINN model.}
     \label{fig:bs_greeks}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.9\textwidth]{figures/bs_greeks_all.pdf}
+    \caption{Full Greeks comparison across methods.}
+    \label{fig:bs_greeks_all}
 \end{figure}

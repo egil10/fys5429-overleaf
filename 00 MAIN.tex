@@ -1,4 +1,4 @@
-\documentclass[10pt]{article}
+\documentclass[10pt,twocolumn]{article}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%% LAYOUT & TEXT %%%%%%%%%%%%
@@ -136,11 +136,14 @@ maxbibnames=99
 
 \begin{document}
 
+\twocolumn[
+\begin{@twocolumnfalse}
 \input{01 FRONTMATTER}
-\input{02 PROGRESS}
 \input{05 ABSTRACT}
+\vspace{0.5cm}
+\end{@twocolumnfalse}
+]
 
-\twocolumn
 \input{10 INTRO}
 \input{11 METHOD}
 \input{12 RESULT}
