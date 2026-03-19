@@ -43,6 +43,12 @@ together with an exponential rescaling of the dependent variable, the Black--Sch
 
 This connection provides both analytical insight and a natural bridge to modern numerical approaches. In this thesis, Physics-Informed Neural Networks (PINNs) are used to solve the Black--Scholes PDE by embedding the governing differential equation directly into the loss function, allowing neural networks to approximate option prices while respecting the underlying diffusion structure inherited from the heat equation.
 
+The Black--Scholes model \parencite{black1973pricing} and its stochastic volatility extension by \textcite{heston1993closed} are the two canonical PDEs studied here. Both were originally solved using analytical or semi-analytical techniques — and this tractability makes them ideal benchmarks for validating machine-learning-based solvers before pushing into regimes where closed-form solutions break down.
+
+Physics-Informed Neural Networks were introduced by \textcite{raissi2019physics} as a general framework for solving forward and inverse problems involving PDEs by encoding the governing equations into the neural network training objective. Unlike classical mesh-based numerical methods such as finite differences or finite elements, PINNs enforce the PDE at a set of randomly sampled collocation points, making them naturally mesh-free and straightforward to extend to higher-dimensional domains. This is a key advantage in financial applications where the option price depends on multiple underlying factors and a fine discretization grid becomes prohibitively expensive.
+
+The broader challenge of solving high-dimensional PDEs with deep learning has attracted significant attention. \textcite{han2018solving} reformulated parabolic PDEs as backward stochastic differential equations and approximated their solutions using deep neural networks, demonstrating scalability to hundreds of dimensions. \textcite{sirignano2018dgm} proposed the Deep Galerkin Method (DGM), which trains neural networks to satisfy the differential operator and boundary conditions at random interior points — an approach closely related to PINNs and applicable to free-boundary problems arising in American option pricing. These works collectively establish the computational foundation that motivates the present study.
+
 While the Black--Scholes model assumes constant volatility, empirical financial markets exhibit stochastic volatility dynamics. A widely used extension is the Heston stochastic volatility model, in which both the asset price and its variance evolve as stochastic processes:
 \[
 dS_t = r S_t dt + \sqrt{v_t}\, S_t dW_t^S,
@@ -77,6 +83,8 @@ rV
 \]
 
 Compared to the Black--Scholes equation, the Heston PDE introduces an additional spatial dimension and a mixed derivative term, making classical numerical solution methods more computationally demanding. This increased complexity makes the model particularly well-suited for physics-informed machine learning approaches. In this thesis, PINNs are therefore applied not only to the Black--Scholes equation but also to the Heston PDE, demonstrating how neural-network-based solvers can handle higher-dimensional option pricing problems governed by diffusion-type equations.
+
+Beyond the forward problem of pricing, PINNs are also naturally suited for the \emph{inverse problem} of model calibration — recovering latent parameters such as the Heston volatility-of-volatility $\xi$, mean reversion speed $\kappa$, or correlation $\rho$ from observed market prices. Because all intermediate quantities are computed via automatic differentiation \parencite{paszke2019pytorch}, gradients with respect to model parameters flow through the solver itself, enabling gradient-based calibration without finite-difference approximations. This connection between forward solvers and differentiable calibration is a central motivation for the physics-informed approach explored in this work.
 
 
 \subsection{The Black--Scholes Model}\label{subsection:bs}

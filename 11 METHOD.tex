@@ -51,7 +51,60 @@ For the Black--Scholes PDE the residual is
 \]
 For the Heston PDE the residual extends to two spatial dimensions $(S, v)$, introducing an additional variance dimension and a mixed derivative term.
 
+\subsection{Network Architecture}\label{subsection:architecture}
+
+The PINN is implemented as a fully connected feedforward network with $L$ hidden layers of width $d$, producing a scalar output $\hat{V}_\theta(S,t)$ (or $\hat{V}_\theta(S,v,t)$ for the Heston case). Formally, for an input $\mathbf{x} = (S,t)$:
+\[
+\mathbf{h}^{(0)} = \mathbf{x},
+\quad
+\mathbf{h}^{(\ell)} = \phi\!\left(W^{(\ell)}\mathbf{h}^{(\ell-1)} + \mathbf{b}^{(\ell)}\right),
+\quad
+\hat{V} = W^{(L+1)}\mathbf{h}^{(L)} + b^{(L+1)},
+\]
+where $\phi$ denotes the activation function applied elementwise and $\theta = \{W^{(\ell)},\mathbf{b}^{(\ell)}\}$ collects all trainable parameters. The output layer is linear to avoid saturating the network's range.
+
+Weight initialization follows the scheme of \textcite{sitzmann2020siren} when using sinusoidal activations, and a standard Xavier or Glorot initialization \parencite{goodfellow2016deep} for smooth activations such as $\tanh$, Swish, and GELU.
+
 \subsection{Activation Functions}\label{subsection:activation}
 
-The choice of activation function affects both the expressivity of the network and the quality of the automatic-differentiation graph used to compute PDE residuals. Standard choices such as ReLU are not suitable for PINNs because they yield zero second derivatives almost everywhere. The hyperbolic tangent $\tanh(z)$ is a natural choice: it is smooth, bounded, and its derivatives are analytically well-behaved, which is important when the loss includes second-order terms such as $\Gamma = \partial^2 V/\partial S^2$. Other smooth activations — Swish, GELU, Softplus, Sine (SIREN) — will also be explored and compared.
+The choice of activation function affects both the expressivity of the network and the quality of the automatic-differentiation graph used to compute PDE residuals. Standard choices such as ReLU are not suitable for PINNs because they yield zero second derivatives almost everywhere. The candidate activations compared in this work are:
+
+\begin{itemize}
+  \item $\tanh(z)$: smooth, bounded, and with analytically well-behaved derivatives — the default baseline.
+  \item \textbf{Swish} \parencite{ramachandran2017swish}: $z\cdot\sigma(z)$, found by automated search to outperform ReLU on many benchmarks.
+  \item \textbf{GELU} \parencite{hendrycks2016gelu}: $z\,\Phi(z)$ where $\Phi$ is the Gaussian CDF; widely used in transformer architectures.
+  \item \textbf{Softplus}: $\log(1+e^z)$, a smooth approximation to ReLU with everywhere-positive first derivative.
+  \item \textbf{Sine (SIREN)} \parencite{sitzmann2020siren}: $\sin(\omega_0 z)$, with periodic activations that provide exact high-order derivatives at all orders.
+\end{itemize}
+
+The second-order term $\Gamma = \partial^2 V/\partial S^2$ in the Black--Scholes residual and the mixed derivative $\partial^2 V/\partial S\,\partial v$ in the Heston residual make the quality of the differentiation graph particularly sensitive to activation choice — this is the primary motivation for systematically comparing these functions.
+
+\subsection{Training Procedure}\label{subsection:training}
+
+The network is trained by minimizing the composite loss in \cref{eq:pinn_loss} using the Adam optimizer \parencite{kingma2015adam} with an initial learning rate $\eta_0$ and a step-decay schedule. At each iteration, a fresh batch of collocation points is sampled uniformly from the interior $\Omega = (0, S_{\max}]\times[0,T)$, and separate batches are drawn from the boundary and initial condition manifolds. This stochastic sampling is the key mesh-free property of PINNs: the effective training domain grows with the number of training steps rather than being fixed by a grid.
+
+The loss weights $\lambda_\text{pde},\lambda_\text{bc},\lambda_\text{ic}$ in \cref{eq:pinn_loss} balance the three residual terms. A common issue in PINN training is \emph{stiffness}: the PDE residual may be orders of magnitude larger or smaller than the boundary terms early in training, leading to one objective dominating. Adaptive weight schemes or sequential training strategies can mitigate this.
+
+\subsection{Inverse Problem: Parameter Calibration}\label{subsection:inverse}
+
+The Heston model contains five parameters $(\kappa, \theta, \xi, \rho, v_0)$ that are not directly observable but must be inferred from market option prices — a process known as calibration. In the PINN framework, unknown parameters can be treated as additional trainable scalars appended to $\theta$ and jointly optimized with the network weights. Given a set of observed prices $\{V^\text{obs}_j\}$ at market points $\{(S_j, v_j, t_j)\}$, the loss is augmented with a data fidelity term:
+\[
+\mathcal{L}_\text{data} = \frac{1}{N_\text{obs}}\sum_{j=1}^{N_\text{obs}}\bigl|\hat{V}_\theta(S_j,v_j,t_j) - V^\text{obs}_j\bigr|^2,
+\]
+and the full loss becomes $\mathcal{L} = \lambda_\text{pde}\mathcal{L}_\text{pde} + \lambda_\text{bc}\mathcal{L}_\text{bc} + \lambda_\text{ic}\mathcal{L}_\text{ic} + \lambda_\text{data}\mathcal{L}_\text{data}$. Because all operations are differentiable through PyTorch's automatic differentiation engine \parencite{paszke2019pytorch}, gradients with respect to the model parameters flow naturally through the solver, enabling gradient-based calibration. This is a significant advantage over classical calibration approaches that rely on finite-difference sensitivity estimates.
+
+\subsection{Heston PINN Formulation}\label{subsection:heston_pinn}
+
+For the Heston PDE, the network takes three inputs $(S, v, t)$ and the PDE residual operator is
+\[
+\mathcal{F}[\hat{V}]
+= \frac{\partial \hat{V}}{\partial t}
++ \frac{1}{2}vS^2\frac{\partial^2 \hat{V}}{\partial S^2}
++ \rho\xi v S\frac{\partial^2 \hat{V}}{\partial S\,\partial v}
++ \frac{1}{2}\xi^2 v\frac{\partial^2 \hat{V}}{\partial v^2}
++ rS\frac{\partial \hat{V}}{\partial S}
++ \kappa(\theta-v)\frac{\partial \hat{V}}{\partial v}
+- r\hat{V}.
+\]
+The boundary conditions encode the large-$S$ and zero-$S$ limits of the call price, and the Feller condition $2\kappa\theta \geq \xi^2$ ensures the variance process stays positive. The terminal condition at $t=T$ is again the call payoff $\max(S-K,0)$. Compared to the Black--Scholes case, the Heston residual requires computing five distinct first and second derivatives (including the mixed $\partial^2/\partial S\,\partial v$), which places additional demands on the activation function and the depth of the network.
 
