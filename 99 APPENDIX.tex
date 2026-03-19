@@ -1,47 +1,61 @@
 \section{Appendix}\label{section:appendix}
 
-\subsection{Black--Scholes PINN Results}
+The figures in this appendix supplement the results presented in \cref{section:result}. All plots were generated from the code repository \parencite{furnes2026fys5429code} using the pipeline scripts for each model. Figures are organized by model and diagnostic type.
+
+\subsection{Black--Scholes PINN Results}\label{appendix:bs}
+
+The following figures correspond to the Black--Scholes PINN trained for 5\,000 steps on the domain $S/K \in [0, 3]$, $\tau \in [0, 1]$ with parameters $r = 0.05$, $\sigma = 0.2$, $K = 100$. The network predicts the normalized price $u = V/K$ to keep all targets $\mathcal{O}(1)$.
 
 \begin{figure}[H]
     \centering
     \includegraphics[width=0.9\textwidth]{figures/bs_surface_comparison.pdf}
-    \caption{Comparison between analytical Black--Scholes solution and PINN approximation.}
+    \caption{Option price surfaces for the Black--Scholes PINN (left) and the closed-form analytical solution (right) over the domain $(S/K, \tau)$. The two surfaces are visually indistinguishable across the interior, with deviations appearing near the payoff singularity at expiry.}
     \label{fig:bs_surface_comparison}
 \end{figure}
 
 \begin{figure}[H]
     \centering
     \includegraphics[width=0.9\textwidth]{figures/bs_error_map.pdf}
-    \caption{Corresponding error surface for the PINN approximation.}
+    \caption{Absolute pointwise error $|\hat{V}_\theta - V_\text{BS}|$ across the $(S/K, \tau)$ domain. The maximum error is concentrated near the at-the-money region at short maturities, where the payoff has the sharpest gradient. Away from expiry the error falls off uniformly.}
     \label{fig:bs_error_map}
 \end{figure}
 
 \begin{figure}[H]
     \centering
     \includegraphics[width=0.9\textwidth]{figures/bs_slices.pdf}
-    \caption{Cross-sectional slices of the solution.}
+    \caption{Cross-sectional slices of the PINN solution (solid) and analytical solution (dashed) as a function of $S/K$ at fixed maturities $\tau \in \{0.1, 0.25, 0.5, 1.0\}$. The PINN tracks the analytical curve closely at all maturities, including the shallow-slope region deep out-of-the-money and the near-linear in-the-money region.}
     \label{fig:bs_slices}
 \end{figure}
 
 \begin{figure}[H]
     \centering
     \includegraphics[width=0.9\textwidth]{figures/bs_loss.pdf}
-    \caption{Training loss evolution of the PINN.}
+    \caption{Training loss curves for the Black--Scholes PINN over 5\,000 Adam steps, showing the total loss together with its three components: PDE residual $\mathcal{L}_\text{pde}$, boundary condition $\mathcal{L}_\text{bc}$, and initial condition $\mathcal{L}_\text{ic}$ (weighted by $\lambda_\text{pde} = 1$, $\lambda_\text{bc} = 5$, $\lambda_\text{ic} = 10$). The initial-condition term dominates early training before all three components converge.}
     \label{fig:bs_loss}
 \end{figure}
 
-\subsection{Greeks Analysis}
+\subsection{Greeks Analysis}\label{appendix:greeks}
+
+Option Greeks are computed by differentiating the trained PINN output with respect to its inputs via automatic differentiation, providing a byproduct of the same computational graph used for the PDE residual. First-order Greeks ($\Delta$, $\Theta$) require one backward pass; second-order Greeks ($\Gamma$) require a second pass.
 
 \begin{figure}[H]
     \centering
     \includegraphics[width=0.9\textwidth]{figures/bs_greeks.pdf}
-    \caption{Estimated option Greeks from the PINN model.}
+    \caption{Selected option Greeks ($\Delta$, $\Gamma$, Vega, $\Theta$) estimated from the trained Black--Scholes PINN via automatic differentiation, plotted as functions of spot price $S$ at maturity $\tau = 0.5$. The PINN-derived Greeks exhibit the expected qualitative shapes and smoothness, with no finite-difference approximations involved.}
     \label{fig:bs_greeks}
 \end{figure}
 
 \begin{figure}[H]
     \centering
     \includegraphics[width=0.9\textwidth]{figures/bs_greeks_all.pdf}
-    \caption{Full Greeks comparison across methods.}
+    \caption{Full comparison of all Greeks between PINN-estimated values and the analytical Black--Scholes formulas across the moneyness range. Higher-order Greeks such as $\Gamma$ and Vanna show slightly larger relative errors than first-order Greeks, consistent with the fact that each additional differentiation amplifies approximation errors.}
     \label{fig:bs_greeks_all}
 \end{figure}
+
+\subsection{Heston PINN Results}\label{appendix:heston}
+
+Figures for the Heston PINN (surface comparison, error maps, and loss curves over the three-dimensional domain $(S/K,\, v,\, \tau)$) will be included here upon completion of Phase 3 (target: April 18, 2026).
+
+\subsection{Calibration Results}\label{appendix:calibration}
+
+Figures for the inverse calibration experiments — including parameter recovery error and convergence of the calibrated Heston parameters $(\kappa, \theta, \xi, \rho, v_0)$ as a function of number of observed option prices — will be included here upon completion of Phase 4 (target: May 23, 2026).
