@@ -1,4 +1,4 @@
-\documentclass[twocolumn,10pt]{article}
+\documentclass[10pt]{article}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%% LAYOUT & TEXT %%%%%%%%%%%%
@@ -135,21 +135,24 @@ maxbibnames=99
 
 
 \begin{document}
+
 \input{01 FRONTMATTER}
 \input{02 PROGRESS}
-\twocolumn[
-\begin{@twocolumnfalse}
 \input{05 ABSTRACT}
-\end{@twocolumnfalse}
-]
+
+\twocolumn
 \input{10 INTRO}
 \input{11 METHOD}
 \input{12 RESULT}
 \input{13 CONCLUSION}
-\newpage 
+
+\clearpage
 \input{97 MIDRULE}
-\input{98 BIB}
-\vspace{2em}
+\printbibliography
+
+\clearpage
+\onecolumn
+\appendix
 \input{99 APPENDIX}
 
 \end{document}
