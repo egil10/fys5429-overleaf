@@ -1,36 +1,64 @@
 \section{Introduction}\label{section:Introduction}
 
-
-The classical starting point for many differential equation (PDE) methods in mathematical finance is the heat equation, which describes the diffusion of temperature in a homogenous medium. In one spatial dimension the heat equation is given in \cref{eq:heat-equation}, where $u(x,t)$ represents temperature, $t$ denotes time, $x$ is the spatial coordinate, and $\alpha>0$ is the thermal diffusivity constant. 
+Option pricing is one of the clearest examples of how ideas from mathematical physics enter modern finance. At the centre of this connection lies the heat equation, the canonical partial differential equation governing diffusion. In one spatial dimension, the heat equation is given by
 \begin{equation}\label{eq:heat-equation}
-    \frac{\partial u}{\partial t}(x, t) = \alpha\frac{\partial^2 u}{\partial x^2}(x, t)
+    \frac{\partial u}{\partial t}(x,t)
+    =
+    \alpha
+    \frac{\partial^2 u}{\partial x^2}(x,t),
 \end{equation}
+where $u(x,t)$ denotes the state variable, $x$ the spatial coordinate, $t$ time, and $\alpha>0$ the diffusion coefficient. The equation states that local changes in the field are driven by spatial curvature: sharp irregularities are progressively smoothed out over time. This diffusion mechanism is not only central in physics, but also appears, after a suitable transformation, in the mathematical structure of option-pricing PDEs.
 
-The equation states that the rate of change in temperature is proportional to the spatial curvature of the temperature field, capturing the fundamental mechanism of diffusion. 
+The classical Black--Scholes model \parencite{black1973pricing}, is the most important example of this connection. Under geometric Brownian motion, the value of a European option, $V(S,t)$, satisfies a parabolic PDE whose second-order term describes diffusion in the underlying asset price. By introducing the log-moneyness transformation
+\begin{equation}
+    x = \ln\left(\frac{S}{K}\right)
+\end{equation}
+and reversing time through the time-to-maturity variable
+\begin{equation}
+    \tau = T-t,
+\end{equation}
+the Black--Scholes equation can be reduced to a heat-equation form. In this sense, option pricing may be interpreted as a diffusion problem: the terminal payoff is propagated backward through time into a smooth continuation-value surface.
 
-In this thesis, Physics-Informed Neural Networks (PINNs) are used to solve the Black-Scholes PDE by embedding the governing differential equation directly into the loss function, allowing neural networks to approximate option prices while respecting the underlying diffusion structure inherited from the heat equation. 
+This interpretation is especially clear when considering the payoff at expiry. At $\tau=0$, a European option has no remaining time value, and its price is determined entirely by intrinsic value. For a European call and put, the payoff functions are shown below
+\begin{align}
+    C(S,0) &= \max(S-K,0), \\
+    P(S,0) &= \max(K-S,0).
+\end{align}
+Both payoffs are continuous but not differentiable at the strike price. This non-smooth point is financially important because it separates out-of-the-money and in-the-money regions; mathematically, it creates a localized singularity in curvature. \cref{fig:black2d.pdf} shows this terminal cross-section.
 
-The Black-Scholes model \parencite{black1973pricing} and its stochastic volatility extention by \textcite{heston1993closed} are the two canonical PDEs studied here. Both were originally solved using analytical or semi-analytical techniques, and this tractability makes them ideal benchmarks for validating machine-learning-based solvers before pushing into regimes where closed-form solutions break down. 
-
-PINNs were introduced by \textcite{raissi2019physics} as a general framework for solving forward and inverse problems using PDEs by encoding the governing equations in the neural network training objective. Unlike classical mesh-based numerical methods such as finite differences or finite elements, PINNs enforce the PDE at a set of randomly sampled collocation points, making them naturally mesh-free and straightforward to extend to higher-dimensional domains. This is a key advantage in financial applications where the option price depends on multiple underlying factors and a fine discretization grid becomes prohibitively expensive. 
-
-In this thesis PINNs are applied not only to the Black-Scholes equation but also to the Heston PDE, demonstrating how neural-network-based solvers can handle higher-dimenional option pricing problems governed by diffusion-type equations. 
-
-Beyond the forward problem of pricing, PINNs are also 
-
-
-\subsection{Black-Scholes}
-
-\begin{figure}[H]
-    \centering
-    \includegraphics[width=\linewidth]{figures/black3d.pdf}
-    \caption{Black-Scholes 3 dimensional surface}
-    \label{fig:black3d.pdf}
-\end{figure}
-
-\begin{figure}[H]
+\begin{figure}[htbp!]
     \centering
     \includegraphics[width=\linewidth]{figures/black2d.pdf}
-    \caption{Black-Scholes 2 dimensional}
+    \caption{Terminal payoff functions for European call and put options in the Black--Scholes setting. At expiry, the option value is purely intrinsic. The kink at the strike price $K=100$ marks the transition between out-of-the-money and in-the-money regimes and creates a non-smooth boundary condition for the pricing PDE.}
     \label{fig:black2d.pdf}
 \end{figure}
+
+The numerical challenge is therefore already visible at the terminal condition: a pricing method must learn a function that begins with a sharp kink but becomes smooth as time to maturity increases. Moving backward from expiry, the parabolic structure of the Black--Scholes PDE diffuses the terminal payoff. The option price surface is consequently smooth for $\tau>0$, with the continuation value emerging from the interaction between uncertainty, time, and discounting. This smoothing effect is illustrated in \cref{fig:black3d.pdf}, where the two-dimensional payoff curve expands into a full price surface over asset price and time to maturity.
+
+\begin{figure*}[t]
+    \centering
+    \includegraphics[width=0.95\textwidth]{figures/black3d.pdf}
+    \caption{Black--Scholes option-price surfaces over asset price and time to maturity. The terminal payoff kink is smoothed backward in time by the diffusion structure of the PDE, producing a continuous continuation-value surface.}
+    \label{fig:black3d.pdf}
+\end{figure*}
+
+This project investigates Physics-Informed Neural Networks (PINNs) as mesh-free solvers for such option-pricing PDEs. Introduced by \textcite{raissi2019physics}, PINNs embed the governing differential equation directly into the training objective of a neural network. Rather than fitting only observed data, the network is penalized whenever its output violates the PDE, boundary conditions, or terminal payoff condition. The learned function is therefore constrained not merely to interpolate prices, but to behave like a solution of the underlying financial model.
+
+This is conceptually attractive for option pricing. Classical finite-difference and finite-element methods rely on an explicit discretization of the computational domain. Such methods are powerful in low dimensions, but they become increasingly expensive as more state variables are introduced. PINNs instead evaluate the PDE residual at sampled collocation points. Since the network itself represents the continuous solution, no fixed tensor-product grid is required. This mesh-free property makes PINNs particularly appealing for models beyond Black--Scholes.
+
+The Heston model provides the main higher-dimensional test case in this report. Unlike Black--Scholes, which assumes constant volatility, the Heston model treats variance as a stochastic state variable. The option price therefore depends not only on asset price and time, but also on instantaneous variance:
+\begin{equation}
+    V = V(S,v,t).
+\end{equation}
+The resulting PDE contains an additional spatial dimension and a mixed derivative term arising from the correlation between asset-price and variance shocks. This makes the Heston equation substantially more demanding than the Black--Scholes PDE and therefore a more meaningful test of whether PINNs can handle realistic financial models.
+
+Beyond the forward pricing problem, PINNs also offer a natural framework for inverse calibration. In market applications, option prices are observed, but model parameters are latent. For the Heston model, quantities such as the mean-reversion speed $\kappa$, long-run variance $\theta$, volatility of volatility $\xi$, and correlation $\rho$ must be inferred from option-price data. Traditional calibration is typically formulated as a nonlinear optimization problem over repeated pricing evaluations. A PINN provides a different approach: because the pricing function and its derivatives are differentiable with respect to both inputs and parameters, calibration can be performed by optimizing the model parameters directly through automatic differentiation.
+
+The objective of this project is therefore threefold.
+\begin{enumerate}
+    \item First, the Black--Scholes equation is used as a benchmark problem where the PINN solution can be compared against a closed-form analytical price. 
+    \item Second, the framework is extended to the Heston stochastic-volatility PDE and evaluated against a semi-analytical reference solution.
+    \item Third, the Heston PINN is adapted to an inverse setting in which latent model parameters are recovered from noisy synthetic market prices.
+\end{enumerate}
+
+The remainder of the report is organized as follows. \cref{section:methods} presents the mathematical models, PINN formulation, automatic-differentiation approach, and collocation sampling strategy. The results section reports the Black--Scholes forward solution, the Heston forward solution, and the inverse Heston calibration experiment. The final section discusses the accuracy, limitations, and practical viability of PINNs for option pricing and parameter recovery.

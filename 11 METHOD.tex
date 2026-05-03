@@ -1,132 +1,316 @@
 \section{Methods}\label{section:methods}
 
-One importance of the heat equation in option pricing arises from the fact that the Black-Scholes PDE can be transformed into a diffusion equation of this form through a suitable change of variables. 
+This section describes the mathematical models, neural-network formulation, automatic-differentiation procedure, and collocation strategies used in the project. The overall objective is to approximate option-price surfaces by training PINNs that satisfy the governing pricing PDEs while also respecting terminal payoff and boundary conditions. 
 
-Under the standard geometric Brownian motion model for an asset price $S_t$,
-\begin{equation}
-    dS_t = \mu S_tdt + \sigma S_t dW_t 
-\end{equation}
-the value $V(S,t)$ of a European option satisfies the Black-Scholes PDE
-\begin{equation}
-    \frac{\partial V}{\partial t} + \frac{1}{2}\sigma^2S^2\frac{\partial^2 V}{\partial S^2} + rS\frac{\partial V}{\partial S}-rV=0
-\end{equation}
+The Black--Scholes model is first used as a controlled benchmark with an analytical solution, before extending the same framework to the higher-dimensional Heston stochastic-volatility model and finally to an inverse calibration problem.
 
-By introducing the log-price transformation
-\begin{equation}
-    x=\ln\left(\frac{S}{K}\right),\quad\tau=T-t
-\end{equation}
-together with an exponential rescaling of the dependent variable, the Black-Scholes equation can be reduced to the standard diffusion equation
-\begin{equation}
-    \frac{\partial u}{\partial \tau}=\frac{\partial^2 u}{\partial x^2}
-\end{equation}
+\subsection{From option-pricing PDEs to diffusion equations}
 
-This connection provides both analytical insight and a natural bridge to modern numerical approaches.
-
-\subsection{The Black-Scholes model}
-
-The Black-Scholes model \parencite{black1973pricing} prices a European call or put option analytically under the assumption of constant volatility. Given the log-moneyness variables $d_1$ and $d_2$.
+The connection between option pricing and physics arises from the diffusion structure of the Black--Scholes equation. Under the standard geometric Brownian motion model,
 \begin{equation}
-    d_1=\frac{\ln(S/K)+(r+\frac{1}{2}\sigma^2)T}{\sigma\sqrt{T}},\quad d_2=d_1-\sigma\sqrt{T}
+    dS_t = \mu S_t\,dt + \sigma S_t\,dW_t,
 \end{equation}
-the call and put prices are 
+the value $V(S,t)$ of a European option satisfies, under risk-neutral pricing, the Black--Scholes PDE
+\begin{equation}\label{eq:bs_pde}
+    \frac{\partial V}{\partial t}
+    + \frac{1}{2}\sigma^2 S^2 \frac{\partial^2 V}{\partial S^2}
+    + rS\frac{\partial V}{\partial S}
+    - rV = 0.
+\end{equation}
+Here $S$ denotes the underlying asset price, $t$ calendar time, $r$ the risk-free interest rate, and $\sigma$ the volatility.
+
+A key analytical insight is that \cref{eq:bs_pde} can be transformed into a standard diffusion equation. Introducing the log-moneyness coordinate and time-to-maturity variable
+\begin{equation}
+    x = \ln\left(\frac{S}{K}\right),
+    \qquad
+    \tau = T-t,
+\end{equation}
+together with a suitable exponential rescaling of the dependent variable, reduces the Black--Scholes equation to the canonical heat equation
+\begin{equation}
+    \frac{\partial u}{\partial \tau}
+    =
+    \frac{\partial^2 u}{\partial x^2}.
+\end{equation}
+This transformation motivates the use of PINNs: instead of solving the pricing PDE on a fixed mesh, the neural network is trained to learn a smooth function whose derivatives satisfy the same diffusion-type structure at sampled collocation points.
+
+\subsection{The Black--Scholes model}
+
+The Black--Scholes model \parencite{black1973pricing} provides a closed-form benchmark for European option prices under the assumptions of constant volatility, continuous trading, frictionless markets, and lognormally distributed asset prices. For a European call or put with strike $K$ and maturity $T$, define
+\begin{equation}
+    d_1 =
+    \frac{\ln(S/K) + \left(r+\frac{1}{2}\sigma^2\right)T}
+    {\sigma\sqrt{T}},
+    \qquad
+    d_2 = d_1 - \sigma\sqrt{T}.
+\end{equation}
+The corresponding call and put prices are
 \begin{align}
-    C&=SN(d_1)-Ke^{-rT}N(d_2)\\
-    P&= Ke^{-rT}N(-d_2)-SN(-d_1)
+    C &= S N(d_1) - K e^{-rT} N(d_2), \\
+    P &= K e^{-rT} N(-d_2) - S N(-d_1),
 \end{align}
-where $S$ is the current asset price, $K$ the strike, $r$ the risk-free rate, $\sigma$ the volatility, $T$ the time to maturity, and $N(\cdot)$ the standard normal CDF.
+where $N(\cdot)$ is the standard normal cumulative distribution function. These analytical prices are used as ground truth for validating the Black--Scholes PINN.
 
-\subsection{The Heston model}
-
-While the Black-Scholes model assumes constant volatility, empirical financial markets exhibit stochastic volatility dynamics. A widely used extension is the Heston stochastic volatility model, introduced by \textcite{heston1993closed}, in which both the asset price and its variance evolve as stochastic processes:
-\begin{align}
-    dS_t&=rS_tdt+\sqrt{v_t}S_tdW_t^S \\
-    d_vt&=\kappa(\theta-v_t)dt+\xi\sqrt{v_t}dW_t^v
-\end{align}
-with correlation
+For the PINN implementation, the problem is expressed in terms of time to maturity $\tau = T-t$. The terminal payoff at expiry therefore becomes an initial condition at $\tau=0$:
 \begin{equation}
-    dW_t^sdW_t^v=\rho dt
+    V(S,0) = \max(S-K,0)
 \end{equation}
-
-In this setting, the option price becomes a function $V(S,v,t)$ and satisfies the two-dimensional Heston PDE
+for a European call option. The lower and upper asset-price boundaries are chosen to reflect the asymptotic behavior of the call price:
 \begin{align}
+    V(0,\tau) &\approx 0, \\
+    V(S_{\max},\tau) &\approx S_{\max} - K e^{-r\tau}.
+\end{align}
+
+\subsection{The Heston stochastic-volatility model}
+
+The Black--Scholes assumption of constant volatility is mathematically convenient but empirically restrictive. Market option prices typically imply volatility smiles and skews, suggesting that volatility itself should be treated as stochastic. The Heston model \parencite{heston1993closed} extends Black--Scholes by introducing a stochastic variance process $v_t$:
+\begin{align}
+    dS_t &= rS_t\,dt + \sqrt{v_t}S_t\,dW_t^S, \\
+    dv_t &= \kappa(\theta-v_t)\,dt + \xi\sqrt{v_t}\,dW_t^v,
+\end{align}
+with instantaneous correlation
+\begin{equation}
+    dW_t^S dW_t^v = \rho\,dt.
+\end{equation}
+The parameters $\kappa$, $\theta$, $\xi$, and $\rho$ denote the mean-reversion speed, long-run variance, volatility of volatility, and Brownian correlation, respectively.
+
+Under this model, the option price depends on three variables:
+\begin{equation}
+    V = V(S,v,t).
+\end{equation}
+The corresponding Heston pricing PDE is
+\begin{align}\label{eq:heston_pde}
 \frac{\partial V}{\partial t}
-&+ \frac{1}{2} v S^2 \frac{\partial^2 V}{\partial S^2}
-+ \rho \xi v S \frac{\partial^2 V}{\partial S \partial v}
-+ \frac{1}{2} \xi^2 v \frac{\partial^2 V}{\partial v^2} \notag \\
-&+ rS \frac{\partial V}{\partial S}
-+ \kappa(\theta - v)\frac{\partial V}{\partial v}
+&+ \frac{1}{2}vS^2 \frac{\partial^2 V}{\partial S^2}
++ \rho\xi vS \frac{\partial^2 V}{\partial S \partial v}
++ \frac{1}{2}\xi^2 v \frac{\partial^2 V}{\partial v^2} \notag \\
+&+ rS\frac{\partial V}{\partial S}
++ \kappa(\theta-v)\frac{\partial V}{\partial v}
 - rV = 0.
 \end{align}
 
-Compared to the Black-Scholes equation, the Heston PDE introduces an additional spatial dimension and a mixed derivative term, making classical numerical solution methods more computationally demanding. This increased complexity makes the model particularly well-suited for physics-informed machine learning approaches. 
+Compared with the Black--Scholes PDE, the Heston equation introduces both an additional spatial dimension and a mixed derivative term. This makes grid-based numerical methods more demanding, because the computational cost grows rapidly as extra state variables are added. The Heston model is therefore a natural test case for PINNs, whose mesh-free formulation can sample the higher-dimensional domain without constructing a full tensor-product grid.
 
-\subsection{Greeks}
+\subsection{Physics-Informed Neural Networks (PINNs)}
+
+A PINN approximates the option-price function by a neural network
+\begin{equation}
+    V_\theta(S,\tau)
+    \quad \text{or} \quad
+    V_\theta(S,v,\tau),
+\end{equation}
+where $\theta$ denotes the trainable network weights. The network is trained not only to match payoff and boundary information, but also to satisfy the governing PDE in the interior of the domain.
+
+The total loss is written as a weighted sum of PDE, initial-condition, and boundary-condition terms:
+\begin{equation}\label{eq:pinn_loss}
+    \mathcal{L}
+    =
+    \lambda_{\mathrm{pde}}\mathcal{L}_{\mathrm{pde}}
+    +
+    \lambda_{\mathrm{ic}}\mathcal{L}_{\mathrm{ic}}
+    +
+    \lambda_{\mathrm{bc}}\mathcal{L}_{\mathrm{bc}}.
+\end{equation}
+The PDE loss is computed as the mean squared residual of the relevant pricing equation:
+\begin{equation}
+    \mathcal{L}_{\mathrm{pde}}
+    =
+    \frac{1}{N_f}
+    \sum_{i=1}^{N_f}
+    \left|
+        \mathcal{R}_\theta(\mathbf{x}_i)
+    \right|^2,
+\end{equation}
+where $\mathcal{R}_\theta$ is the Black--Scholes or Heston PDE residual evaluated at interior collocation points $\mathbf{x}_i$. For the Black--Scholes model, $\mathbf{x}_i=(S_i,\tau_i)$, while for the Heston model, $\mathbf{x}_i=(S_i,v_i,\tau_i)$.
+
+The initial-condition loss enforces the payoff at maturity:
+\begin{equation}
+    \mathcal{L}_{\mathrm{ic}}
+    =
+    \frac{1}{N_{\mathrm{ic}}}
+    \sum_{i=1}^{N_{\mathrm{ic}}}
+    \left|
+        V_\theta(S_i,0) - \max(S_i-K,0)
+    \right|^2.
+\end{equation}
+The boundary-condition loss enforces the expected limiting behavior at the edges of the computational domain:
+\begin{equation}
+    \mathcal{L}_{\mathrm{bc}}
+    =
+    \frac{1}{N_{\mathrm{bc}}}
+    \sum_{i=1}^{N_{\mathrm{bc}}}
+    \left|
+        V_\theta(\mathbf{x}^{\mathrm{bc}}_i)
+        -
+        g(\mathbf{x}^{\mathrm{bc}}_i)
+    \right|^2,
+\end{equation}
+where $\mathbf{x}^{\mathrm{bc}}_i$ denotes a boundary collocation point and
+$g(\mathbf{x}^{\mathrm{bc}}_i)$ is the prescribed boundary value at that point.
+For the Black--Scholes call option, the asset-price boundaries are given by
+\begin{align}
+    V_\theta(0,\tau) &\approx 0, \\
+    V_\theta(S_{\max},\tau) &\approx S_{\max} - K e^{-r\tau}.
+\end{align}
+For the Heston model, analogous boundary penalties are imposed along both the
+asset-price and variance boundaries.
+
+All derivatives appearing in the PDE residuals are computed using automatic differentiation. This is central to the PINN approach: the model does not approximate derivatives using finite differences, but instead differentiates the neural network directly with respect to its inputs. As a result, first-order, second-order, mixed, and even higher-order sensitivities can be obtained from the same computational graph used during training.
+
+\subsection{Inverse Heston calibration}
+
+In the inverse problem, the goal is no longer only to approximate the price surface for known parameters. Instead, selected Heston parameters are treated as trainable variables and recovered from synthetic market observations. The network is therefore optimized to satisfy three requirements simultaneously: fit observed option prices, respect the terminal and boundary conditions, and remain consistent with the Heston PDE.
+
+For this setting, the loss function is extended by adding a market-data term:
+\begin{equation}\label{eq:inverse_loss}
+    \mathcal{L}_{\mathrm{inv}}
+    =
+    \lambda_{\mathrm{pde}}\mathcal{L}_{\mathrm{pde}}
+    +
+    \lambda_{\mathrm{ic}}\mathcal{L}_{\mathrm{ic}}
+    +
+    \lambda_{\mathrm{bc}}\mathcal{L}_{\mathrm{bc}}
+    +
+    \lambda_{\mathrm{data}}\mathcal{L}_{\mathrm{data}},
+\end{equation}
+where
+\begin{equation}
+    \mathcal{L}_{\mathrm{data}}
+    =
+    \frac{1}{N_m}
+    \sum_{i=1}^{N_m}
+    \left|
+        V_\theta(S_i,v_i,\tau_i)
+        -
+        V_i^{\mathrm{market}}
+    \right|^2.
+\end{equation}
+Here $V_i^{\mathrm{market}}$ denotes the observed or synthetic market price at the sampled point $(S_i,v_i,\tau_i)$. In this project, synthetic prices are generated from the Heston model and perturbed with Gaussian noise in order to mimic imperfect market observations, bid--ask effects, and calibration noise.
+
+The inverse PINN can therefore be viewed as a differentiable calibration engine. Since the PDE residual depends explicitly on $\kappa$, $\theta$, $\xi$, and $\rho$, gradients of the loss with respect to these parameters are obtained directly through automatic differentiation and optimized jointly with the network weights.
+
+\subsection{Greeks and automatic differentiation}
+
+The Greeks measure the sensitivity of an option price to changes in state variables, time, and model parameters. In classical numerical implementations, these quantities are often estimated by bump-and-revalue procedures, where one input is perturbed and the pricing model is re-evaluated. This becomes increasingly expensive for mixed, higher-order, or model-specific sensitivities.
+
+In the PINN framework, the Greeks are obtained directly by differentiating the trained neural-network price function. This is a natural by-product of the method: the same automatic-differentiation machinery used to construct the PDE residual is also used to compute price sensitivities. First-order, second-order, mixed, and third-order derivatives can therefore be extracted from the learned price surface without introducing a finite-difference stencil or repeatedly re-running the pricing model.
+
+Since the project considers both the Black--Scholes and Heston models, two types of volatility sensitivity appear. In the Black--Scholes setting, volatility is a constant model parameter $\sigma$, so Vega-type quantities are derivatives with respect to $\sigma$. In the Heston setting, variance is itself a state variable $v$, so the corresponding sensitivities are derivatives with respect to $v$. The Greeks computed in this project are summarized in \cref{tab:greeks_expressions}.
+
+The distinction between $\sigma$-Greeks and $v$-Greeks is important. In the Black--Scholes model, Vega, Vomma, Vanna, and Zomma describe sensitivity to the constant volatility parameter. In the Heston model, volatility enters through the variance state variable, and the corresponding quantities measure how the learned price surface changes along the variance dimension. Thus, the Heston quantities Vega$_v$, Volga$_v$, Vanna$_v$, and Zomma$_v$ should be interpreted as variance-state sensitivities rather than direct Black--Scholes volatility sensitivities.
 
 \begin{table}[H]
     \centering
     \small
-    \setlength{\tabcolsep}{6pt}
+    \setlength{\tabcolsep}{4pt}
     \renewcommand{\arraystretch}{1.18}
-    \caption{Greeks and corresponding derivative expressions.}
+    \caption{Greeks and derivative expressions computed from the trained PINN price function. Black--Scholes sensitivities are expressed with respect to the constant volatility parameter $\sigma$, while Heston sensitivities are expressed with respect to the variance state variable $v$.}
     \label{tab:greeks_expressions}
-    \begin{tabularx}{\linewidth}{@{} l X c @{}}
+    \begin{tabularx}{\linewidth}{@{} l X c c @{}}
         \toprule
-        \textbf{Greek} & \textbf{Expression} & \textbf{Order} \\
+        \textbf{Greek} & \textbf{Expression} & \textbf{Order} & \textbf{Model} \\
         \midrule
 
-        \multicolumn{3}{@{}l}{\textbf{First-order}} \\
+        \multicolumn{4}{@{}l}{\textbf{Price level}} \\
+        Price
+            & $V$
+            & -- 
+            & BS/HS \\
+
+        \addlinespace[0.25em]
+        \multicolumn{4}{@{}l}{\textbf{First-order sensitivities}} \\
         Delta $(\Delta)$
             & $\partial V / \partial S$
-            & 1st \\
+            & 1st
+            & BS/HS \\
         Theta $(\Theta)$
-            & $\partial V / \partial t$
-            & 1st \\
+            & $\partial V / \partial \tau$
+            & 1st
+            & BS/HS \\
         Rho $(\rho)$
             & $\partial V / \partial r$
-            & 1st \\
+            & 1st
+            & BS \\
         Phi $(\Phi)$
             & $\partial V / \partial q$
-            & 1st \\
+            & 1st
+            & BS \\
         Vega
             & $\partial V / \partial \sigma$
-            & 1st \\
+            & 1st
+            & BS \\
+        Vega$_v$
+            & $\partial V / \partial v$
+            & 1st
+            & HS \\
 
         \addlinespace[0.25em]
-        \multicolumn{3}{@{}l}{\textbf{Second-order}} \\
+        \multicolumn{4}{@{}l}{\textbf{Second-order sensitivities}} \\
         Gamma $(\Gamma)$
             & $\partial^2 V / \partial S^2$
-            & 2nd \\
+            & 2nd
+            & BS/HS \\
         Vomma
             & $\partial^2 V / \partial \sigma^2$
-            & 2nd \\
+            & 2nd
+            & BS \\
+        Volga$_v$
+            & $\partial^2 V / \partial v^2$
+            & 2nd
+            & HS \\
         Vanna
             & $\partial^2 V / \partial S \partial \sigma$
-            & 2nd \\
+            & 2nd
+            & BS \\
+        Vanna$_v$
+            & $\partial^2 V / \partial S \partial v$
+            & 2nd
+            & HS \\
         Charm
-            & $\partial^2 V / \partial S \partial t$
-            & 2nd \\
+            & $\partial^2 V / \partial S \partial \tau$
+            & 2nd
+            & BS/HS \\
 
         \addlinespace[0.25em]
-        \multicolumn{3}{@{}l}{\textbf{Third-order}} \\
+        \multicolumn{4}{@{}l}{\textbf{Third-order sensitivities}} \\
         Speed
             & $\partial^3 V / \partial S^3$
-            & 3rd \\
+            & 3rd
+            & BS/HS \\
         Zomma
             & $\partial^3 V / \partial S^2 \partial \sigma$
-            & 3rd \\
+            & 3rd
+            & BS \\
+        Zomma$_v$
+            & $\partial^3 V / \partial S^2 \partial v$
+            & 3rd
+            & HS \\
         Color
-            & $\partial^3 V / \partial S^2 \partial t$
-            & 3rd \\
+            & $\partial^3 V / \partial S^2 \partial \tau$
+            & 3rd
+            & BS/HS \\
+
+        \addlinespace[0.25em]
+        \multicolumn{4}{@{}l}{\textbf{PDE diagnostic}} \\
+        PDE residual
+            & $\mathcal{R}_\theta$
+            & -- 
+            & BS/HS \\
 
         \bottomrule
     \end{tabularx}
 \end{table}
 
-\subsection{Data}
+\subsection{Collocation data and sampling strategy}
 
-\subsubsection{Black--Scholes}
+PINNs are mesh-free, but they are not data-free: their performance depends strongly on where collocation points are sampled. The collocation design therefore determines which regions of the pricing domain are emphasized during training. Since option-price surfaces contain the strongest curvature near the strike and near expiry, purely uniform sampling can underrepresent precisely the most difficult parts of the problem.
 
-\begin{table}[H]
+To address this, a domain-aware sampling strategy was used. Points were sampled throughout the full computational domain, with additional concentration near financially important regions: near the strike $S \approx K$, near the terminal condition $\tau \approx 0$, and, for the Heston model, near the initial variance level. This creates a richer training set around the kinked payoff and high-curvature regions while still exposing the network to the global structure of the solution.
+
+\subsubsection{Black--Scholes forward problem}
+
+For the Black--Scholes forward problem, the network is trained on interior collocation points, terminal payoff points, and asset-price boundary points. The asset-price domain is chosen wide enough to include deep out-of-the-money, at-the-money, and deep in-the-money behavior.
+
+\begin{table}[!htbp]
     \centering
     \small
     \setlength{\tabcolsep}{6pt}
@@ -141,8 +325,8 @@ Compared to the Black-Scholes equation, the Heston PDE introduces an additional 
         \multicolumn{2}{@{}l}{\textbf{Collocation points}} \\
         Interior points & $5000$ \\
         Initial-condition points & $1000$ \\
-        Boundary-condition points & $250$ \\
-        Upper-boundary points & $250$ \\
+        Boundary $S=0$ & $250$ \\
+        Boundary $S=S_{\max}$ & $250$ \\
 
         \addlinespace[0.25em]
         \multicolumn{2}{@{}l}{\textbf{Domain}} \\
@@ -153,9 +337,13 @@ Compared to the Black-Scholes equation, the Heston PDE introduces an additional 
     \end{tabularx}
 \end{table}
 
-\subsubsection{Heston}
+The main sampling emphasis is placed around $S=K$, where the payoff kink creates large curvature, and around $\tau=0$, where the solution must transition sharply into the terminal payoff condition.
 
-\begin{table}[H]
+\subsubsection{Heston forward problem}
+
+The Heston forward problem extends the input domain from $(S,\tau)$ to $(S,v,\tau)$. This increases the dimensionality of the learning problem and introduces a mixed derivative term in the PDE residual. To maintain sufficient coverage of the enlarged domain, the number of interior collocation points is increased relative to the Black--Scholes case.
+
+\begin{table}[!htbp]
     \centering
     \small
     \setlength{\tabcolsep}{6pt}
@@ -185,9 +373,13 @@ Compared to the Black-Scholes equation, the Heston PDE introduces an additional 
     \end{tabularx}
 \end{table}
 
-\subsubsection{Inverse}
+The Heston sampling strategy again clusters points near the strike and near expiry, but also places emphasis around the relevant variance region. This is important because the model must learn not only the price dependence on $S$ and $\tau$, but also how the option surface deforms as variance changes.
 
-\begin{table}[H]
+\subsubsection{Heston inverse problem}
+
+For the inverse calibration problem, the training set combines physics collocation points with synthetic market observations. The physics points enforce PDE consistency across the full domain, while the market-data points anchor the learned solution to observed option prices.
+
+\begin{table}[!htbp]
     \centering
     \small
     \setlength{\tabcolsep}{6pt}
@@ -225,3 +417,23 @@ Compared to the Black-Scholes equation, the Heston PDE introduces an additional 
         \bottomrule
     \end{tabularx}
 \end{table}
+
+The synthetic market observations are generated inside the domain and perturbed with Gaussian noise of standard deviation $0.5$. This makes the inverse problem more realistic than a noiseless recovery experiment, since actual market prices contain microstructure noise, liquidity effects, and bid--ask variation. The final inverse PINN is therefore evaluated both by its ability to fit prices and by its ability to recover the latent Heston parameters.
+
+\subsection{Computational environment and GPU acceleration}
+
+All numerical experiments were implemented in Python and executed primarily through cloud-based GPU runtimes. The use of Google Colab was essential for making the project computationally feasible, since Colab provides hosted Jupyter notebook environments with access to accelerated computing resources such as GPUs and TPUs \parencite{google_colab_faq}. In practice, the most demanding training runs were performed using high-performance NVIDIA data-center GPUs, including A100 and H100 accelerators.
+
+This computational setup was particularly important for the Heston and inverse-calibration experiments. Compared with the Black--Scholes PINN, the Heston PINN requires a larger input domain, more collocation points, additional partial derivatives, and longer training horizons. The inverse problem is even more demanding because the neural-network weights and latent Heston parameters are optimized jointly. Without GPU acceleration, repeated architecture sweeps, learning-rate tests, loss-weight experiments, and long training runs would have been substantially slower and less practical.
+
+The NVIDIA A100 Tensor Core GPU is designed for large-scale AI, data analytics, and high-performance computing workloads \parencite{nvidia_a100}. The NVIDIA H100 Tensor Core GPU extends this class of accelerator with Hopper-generation Tensor Cores and features aimed at modern deep-learning workloads \parencite{nvidia_h100}. Although this project does not require the scale of frontier model training, the same hardware characteristics are highly useful for PINNs: large batches of collocation points, repeated automatic differentiation, and dense neural-network optimization all benefit directly from GPU parallelism.
+
+The computational workflow therefore consisted of local development and debugging on a personal machine, followed by larger training runs and hyperparameter sweeps in Colab GPU environments. This hybrid workflow made it possible to iterate quickly on code structure while still using cloud GPUs for the expensive training phases.
+
+\subsection{AI-assisted implementation workflow}
+
+The project also used modern AI-assisted development tools as part of the implementation and writing workflow. Source code was developed and edited primarily in VS Code, Cursor, and Google Antigravity. VS Code served as the general-purpose code editor \parencite{vscode}, while Cursor and Google Antigravity were used for AI-assisted coding, refactoring, debugging, and navigating the project structure. Cursor is an AI-oriented code editor designed around natural-language interaction with codebases \parencite{cursor}. Google Antigravity was used as an agentic development environment capable of planning, executing, and verifying coding tasks across the editor, terminal, and browser \parencite{google_antigravity}.
+
+Large language models were also used throughout the project as productivity tools. ChatGPT, Claude, Grok, and Gemini were used for code explanation, debugging assistance, LaTeX formatting, language polishing, and structural editing of the report \parencite{openai_chatgpt,anthropic_claude_code,xai_grok,google_gemini}. Claude Code was additionally useful for codebase-aware development tasks, since it is designed to read codebases, modify files, run commands, and assist with software-development workflows \parencite{anthropic_claude_code}.
+
+These tools were not treated as authoritative mathematical sources. Instead, they were used as interactive assistants for implementation, documentation, and presentation. The mathematical formulation, model selection, numerical experiments, interpretation of results, and final responsibility for the report remain with the author. In this sense, the workflow reflects a modern computational research process: GPU acceleration enabled the numerical experiments, while AI-assisted tools accelerated coding, debugging, formatting, and iteration.
