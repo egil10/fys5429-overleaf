@@ -1,34 +1,282 @@
-\section{Results}\label{section:result}
+\clearpage\section{Results}\label{section:result}
 
-\subsection{Black--Scholes PINN}\label{subsection:result_bs}
+\subsection{Black-Scholes}
 
-The Black--Scholes PINN was trained for 5\,000 Adam steps on a domain covering $S \in [0, 300]$, $\tau \in [0, 1]$ with strike $K = 100$, risk-free rate $r = 0.05$, and volatility $\sigma = 0.20$. The network predicts the normalized price $u = V/K$ so that all targets are $\mathcal{O}(1)$. Loss weights were set to $\lambda_\text{pde} = 1$, $\lambda_\text{bc} = 5$, $\lambda_\text{ic} = 10$, placing heavier emphasis on satisfying the terminal payoff and boundary conditions early in training.
+\subsubsection{Hyperparameters: architecture}
 
-Table~\ref{table:bs_metrics} summarizes the evaluation metrics against the closed-form Black--Scholes solution on a held-out test grid of $50 \times 50$ points uniformly covering the domain.
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\linewidth]{figures/hyper_bs_arch_heatmap.pdf}
+    \caption{Heatmap of the Black--Scholes architecture search across candidate network configurations. The figure highlights how the final validation or pricing error changes with depth and width, making the strongest architectural candidates visually identifiable.}
+    \label{fig:hyper_bs_arch_heatmap.pdf}
+\end{figure}
 
-\begin{table}[h]
-\centering
-\caption{Black--Scholes PINN evaluation metrics on a $50\times50$ test grid ($S \in [0,200]$, $\tau \in [0,1]$).}\label{table:bs_metrics}
-\begin{tabular}{lS[table-format=1.4]}
-\toprule
-Metric & {Value} \\
-\midrule
-RMSE                  & 0.49 \\
-Relative $L^2$ error  & 1.99\% \\
-MAE                   & -- \\
-Max absolute error    & 3.10 \\
-\bottomrule
-\end{tabular}
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\linewidth]{figures/hyper_bs_arch_ranked.pdf}
+    \caption{Ranked comparison of the tested Black--Scholes network architectures. Lower-ranked error configurations indicate architectures that give more accurate PINN approximations under the same training setup.}
+    \label{fig:hyper_bs_arch_ranked.pdf}
+\end{figure}
+
+\subsubsection{Hyperparameters: learning rates}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\linewidth]{figures/hyper_bs_lr_ranked.pdf}
+    \caption{Ranked comparison of learning-rate choices for the Black--Scholes PINN. The results indicate which step sizes provide the best trade-off between stable convergence and final approximation accuracy.}
+    \label{fig:hyper_bs_lr_ranked.pdf}
+\end{figure}
+
+\subsubsection{Hyperparameters: lambda values}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\linewidth]{figures/hyper_bs_heatmap.pdf}
+    \caption{Heatmap of the Black--Scholes loss-weight search over the tested $\lambda$ values. The figure illustrates how the relative weighting of PDE, initial-condition, and boundary-condition terms affects overall model accuracy.}
+    \label{fig:hyper_bs_heatmap.pdf}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\linewidth]{figures/hyper_bs_ranked.pdf}
+    \caption{Ranked comparison of the tested $\lambda$ configurations for the Black--Scholes PINN. The best-performing combinations identify loss weights that balance PDE satisfaction with accurate enforcement of terminal and boundary constraints.}
+    \label{fig:hyper_bs_ranked.pdf}
+\end{figure}
+
+\subsubsection{Hyperparameters: convergence (epochs)}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\linewidth]{figures/hyper_bs_conv_ranked.pdf}
+    \caption{Ranked comparison of Black--Scholes convergence experiments across different epoch budgets. The results show how much additional training improves the PINN approximation before returns begin to diminish.}
+    \label{fig:hyper_bs_conv_ranked.pdf}
+\end{figure}
+
+\subsubsection{Black-Scholes PINN}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{figures/pinn_bs.pdf}
+    \caption{Final Black--Scholes PINN solution after hyperparameter selection. The figure visualizes the learned option-price surface and provides the main qualitative check of whether the network captures the expected payoff and continuation-value structure.}
+    \label{fig:pinn_bs.pdf}
+\end{figure}
+
+
+\begin{table}[H]
+    \centering
+    \small
+    \setlength{\tabcolsep}{6pt}
+    \renewcommand{\arraystretch}{1.18}
+    \caption{PINN-estimated option price, Greeks, and PDE residual.}
+    \label{tab:pinn_greeks}
+    \begin{tabularx}{\linewidth}{@{} l X r @{}}
+        \toprule
+        \textbf{Quantity} & \textbf{Expression} & \textbf{PINN value} \\
+        \midrule
+
+        \multicolumn{3}{@{}l}{\textbf{Price level}} \\
+        Price $(V)$
+            & $V(S,\tau)$
+            & $6.927159$ \\
+
+        \addlinespace[0.25em]
+        \multicolumn{3}{@{}l}{\textbf{First-order}} \\
+        Delta $(\Delta)$
+            & $\partial V / \partial S$
+            & $0.597287$ \\
+        Theta $(\Theta)$
+            & $\partial V / \partial \tau$
+            & $8.053441$ \\
+        Rho $(\rho)$
+            & $\partial V / \partial r$
+            & -- \\
+        Phi $(\Phi)$
+            & $\partial V / \partial q$
+            & -- \\
+        Vega
+            & $\partial V / \partial \sigma$
+            & -- \\
+
+        \addlinespace[0.25em]
+        \multicolumn{3}{@{}l}{\textbf{Second-order}} \\
+        Gamma $(\Gamma)$
+            & $\partial^2 V / \partial S^2$
+            & $0.027053$ \\
+        Vomma
+            & $\partial^2 V / \partial \sigma^2$
+            & -- \\
+        Vanna
+            & $\partial^2 V / \partial S \partial \sigma$
+            & -- \\
+        Charm
+            & $\partial^2 V / \partial S \partial \tau$
+            & $0.093996$ \\
+
+        \addlinespace[0.25em]
+        \multicolumn{3}{@{}l}{\textbf{Third-order}} \\
+        Speed
+            & $\partial^3 V / \partial S^3$
+            & $-0.000629$ \\
+        Zomma
+            & $\partial^3 V / \partial S^2 \partial \sigma$
+            & -- \\
+        Color
+            & $\partial^3 V / \partial S^2 \partial \tau$
+            & $-0.027441$ \\
+
+        \midrule
+        \textbf{PDE residual}
+            & Goal: $0.0$
+            & $\mathbf{2.746582 \times 10^{-3}}$ \\
+        \textbf{Analytical price}
+            & --
+            & $\mathbf{6.888729}$ \\
+        \bottomrule
+    \end{tabularx}
 \end{table}
 
-The relative $L^2$ error of $1.99\%$ and RMSE of $0.49$ (on a price scale of $0$--$200$) confirm that the PINN accurately approximates the Black--Scholes solution across the full domain. The largest absolute error of $3.10$ occurs near the at-the-money boundary at short maturities, where the payoff function has its sharpest kink and the PDE solution changes most rapidly. This behavior is consistent with the known difficulty PINNs face at sharp initial conditions.
+\clearpage
+\subsection{Heston}
 
-Surface plots, error maps, and cross-sectional slices of the PINN solution are shown in Appendix~\ref{appendix:bs}. Greeks computed via automatic differentiation from the trained network are compared against the analytical formulas in Appendix~\ref{appendix:greeks}.
+\subsubsection{Hyperparameters: architecture}
 
-\subsection{Heston PINN}\label{subsection:result_heston}
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\linewidth]{figures/hyper_hs_arch_heatmap.pdf}
+    \caption{Architecture-search heatmap for the Heston PINN. The figure compares candidate network configurations and shows how model architecture affects the final training or validation loss.}
+    \label{fig:hyper_hs_arch_heatmap.pdf}
+\end{figure}
 
-% To be completed in Phase 3 (target: April 18, 2026).
+\subsubsection{Hyperparameters: learning rate}
 
-\subsection{Calibration}\label{subsection:result_calibration}
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\linewidth]{figures/hyper_hs_lr_ranked.pdf}
+    \caption{Ranked comparison of learning-rate choices for the Heston PINN. The figure identifies which learning rates produce the most accurate and stable optimization behavior under the tested setup.}
+    \label{fig:hyper_hs_lr_ranked.pdf}
+\end{figure}
 
-% To be completed in Phase 4 (target: May 23, 2026).
+\subsubsection{Hyperparameters: lambda values}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\linewidth]{figures/hyper_hs_lambda_heatmap.pdf}
+    \caption{Loss-weight heatmap for the Heston PINN across the tested $\lambda$ configurations. The figure shows how the relative weighting of PDE, initial-condition, and boundary-condition terms affects overall model performance.}
+    \label{fig:hyper_hs_lambda_heatmap.pdf}
+\end{figure}
+
+\subsubsection{Hyperparameters: convergence (epochs)}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\linewidth]{figures/hyper_hs_conv_ranked.pdf}
+    \caption{Ranked comparison of Heston PINN convergence experiments across different epoch budgets. The figure illustrates how additional training changes final loss and where the benefits of longer optimization begin to diminish.}
+    \label{fig:hyper_hs_conv_ranked.pdf}
+\end{figure}
+
+\clearpage\subsubsection{Heston PINN}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{figures/pinn_hs.pdf}
+    \caption{Caption}
+    \label{fig:placeholder}
+\end{figure}
+
+\begin{table}[H]
+    \centering
+    \small
+    \setlength{\tabcolsep}{6pt}
+    \renewcommand{\arraystretch}{1.18}
+    \caption{Heston PINN-estimated option price, Greeks, and PDE residual.}
+    \label{tab:heston_pinn_greeks}
+    \begin{tabularx}{\linewidth}{@{} l X r @{}}
+        \toprule
+        \textbf{Quantity} & \textbf{Expression} & \textbf{PINN value} \\
+        \midrule
+
+        \multicolumn{3}{@{}l}{\textbf{Price level}} \\
+        Price $(V)$
+            & $V(S,v,\tau)$
+            & $6.830489$ \\
+
+        \addlinespace[0.25em]
+        \multicolumn{3}{@{}l}{\textbf{First-order}} \\
+        Delta $(\Delta)$
+            & $\partial V / \partial S$
+            & $0.645494$ \\
+        Vega$_v$
+            & $\partial V / \partial v$
+            & $42.177811$ \\
+        Theta $(\Theta)$
+            & $\partial V / \partial \tau$
+            & $8.028887$ \\
+
+        \addlinespace[0.25em]
+        \multicolumn{3}{@{}l}{\textbf{Second-order}} \\
+        Gamma $(\Gamma)$
+            & $\partial^2 V / \partial S^2$
+            & $0.026912$ \\
+        Volga$_v$
+            & $\partial^2 V / \partial v^2$
+            & $-286.995544$ \\
+        Vanna
+            & $\partial^2 V / \partial S \partial v$
+            & $-0.408809$ \\
+        Charm
+            & $\partial^2 V / \partial S \partial \tau$
+            & $0.131729$ \\
+
+        \addlinespace[0.25em]
+        \multicolumn{3}{@{}l}{\textbf{Third-order}} \\
+        Speed
+            & $\partial^3 V / \partial S^3$
+            & $-0.001735$ \\
+        Zomma
+            & $\partial^3 V / \partial S^2 \partial v$
+            & $-0.210728$ \\
+        Color
+            & $\partial^3 V / \partial S^2 \partial \tau$
+            & $-0.032710$ \\
+
+        \midrule
+        \textbf{PDE residual}
+            & Goal: $0.0$
+            & $\mathbf{-6.628036 \times 10^{-2}}$ \\
+        \textbf{Analytical price}
+            & --
+            & $\mathbf{6.837137}$ \\
+        \textbf{PINN error}
+            & $|V_{\mathrm{PINN}} - V_{\mathrm{analytical}}|$
+            & $\mathbf{0.006648}$ \\
+        \bottomrule
+    \end{tabularx}
+\end{table}
+
+
+\clearpage\subsection{Inverse problem}
+
+\subsubsection{Hyperparameters: lambda values}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\linewidth]{figures/hyper_inv_param_recovery.pdf}
+    \caption{Caption}
+    \label{fig:placeholder}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\linewidth]{figures/hyper_inv_lambda_data_sweep.pdf}
+    \caption{Caption}
+    \label{fig:placeholder}
+\end{figure}
+
+\subsubsection{Inverse PINN}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\linewidth]{figures/pinn_error_surface.pdf}
+    \caption{Caption}
+    \label{fig:placeholder}
+\end{figure}

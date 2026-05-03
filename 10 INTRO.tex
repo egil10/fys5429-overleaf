@@ -1,136 +1,36 @@
 \section{Introduction}\label{section:Introduction}
 
-The classical starting point for many partial differential equation (PDE) methods in mathematical finance is the heat equation, which describes the diffusion of temperature in a homogeneous medium. In one spatial dimension, the heat equation is given by
-\[
-\frac{\partial u}{\partial t}(x,t)
-=
-\alpha
-\frac{\partial^2 u}{\partial x^2}(x,t),
-\]
-where $u(x,t)$ represents temperature, $t$ denotes time, $x$ is the spatial coordinate, and $\alpha > 0$ is the thermal diffusivity constant. The equation states that the rate of change in temperature is proportional to the spatial curvature of the temperature field, capturing the fundamental mechanism of diffusion.
 
-The importance of the heat equation in option pricing arises from the fact that the Black--Scholes PDE can be transformed into a diffusion equation of this form through a suitable change of variables.
+The classical starting point for many differential equation (PDE) methods in mathematical finance is the heat equation, which describes the diffusion of temperature in a homogenous medium. In one spatial dimension the heat equation is given in \cref{eq:heat-equation}, where $u(x,t)$ represents temperature, $t$ denotes time, $x$ is the spatial coordinate, and $\alpha>0$ is the thermal diffusivity constant. 
+\begin{equation}\label{eq:heat-equation}
+    \frac{\partial u}{\partial t}(x, t) = \alpha\frac{\partial^2 u}{\partial x^2}(x, t)
+\end{equation}
 
-Under the standard geometric Brownian motion model for an asset price $S_t$,
-\[
-dS_t = \mu S_t dt + \sigma S_t dW_t,
-\]
-the value $V(S,t)$ of a European option satisfies the Black--Scholes PDE
-\[
-\frac{\partial V}{\partial t}
-+
-\frac{1}{2}\sigma^2 S^2 \frac{\partial^2 V}{\partial S^2}
-+
-rS \frac{\partial V}{\partial S}
--
-rV
-=
-0.
-\]
+The equation states that the rate of change in temperature is proportional to the spatial curvature of the temperature field, capturing the fundamental mechanism of diffusion. 
 
-By introducing the log-price transformation
-\[
-x = \ln\left(\frac{S}{K}\right),
-\quad
-\tau = T - t,
-\]
-together with an exponential rescaling of the dependent variable, the Black--Scholes equation can be reduced to the standard diffusion equation
-\[
-\frac{\partial u}{\partial \tau}
-=
-\frac{\partial^2 u}{\partial x^2}.
-\]
+In this thesis, Physics-Informed Neural Networks (PINNs) are used to solve the Black-Scholes PDE by embedding the governing differential equation directly into the loss function, allowing neural networks to approximate option prices while respecting the underlying diffusion structure inherited from the heat equation. 
 
-This connection provides both analytical insight and a natural bridge to modern numerical approaches. In this thesis, Physics-Informed Neural Networks (PINNs) are used to solve the Black--Scholes PDE by embedding the governing differential equation directly into the loss function, allowing neural networks to approximate option prices while respecting the underlying diffusion structure inherited from the heat equation.
+The Black-Scholes model \parencite{black1973pricing} and its stochastic volatility extention by \textcite{heston1993closed} are the two canonical PDEs studied here. Both were originally solved using analytical or semi-analytical techniques, and this tractability makes them ideal benchmarks for validating machine-learning-based solvers before pushing into regimes where closed-form solutions break down. 
 
-The Black--Scholes model \parencite{black1973pricing} and its stochastic volatility extension by \textcite{heston1993closed} are the two canonical PDEs studied here. Both were originally solved using analytical or semi-analytical techniques — and this tractability makes them ideal benchmarks for validating machine-learning-based solvers before pushing into regimes where closed-form solutions break down.
+PINNs were introduced by \textcite{raissi2019physics} as a general framework for solving forward and inverse problems using PDEs by encoding the governing equations in the neural network training objective. Unlike classical mesh-based numerical methods such as finite differences or finite elements, PINNs enforce the PDE at a set of randomly sampled collocation points, making them naturally mesh-free and straightforward to extend to higher-dimensional domains. This is a key advantage in financial applications where the option price depends on multiple underlying factors and a fine discretization grid becomes prohibitively expensive. 
 
-Physics-Informed Neural Networks were introduced by \textcite{raissi2019physics} as a general framework for solving forward and inverse problems involving PDEs by encoding the governing equations into the neural network training objective. Unlike classical mesh-based numerical methods such as finite differences or finite elements, PINNs enforce the PDE at a set of randomly sampled collocation points, making them naturally mesh-free and straightforward to extend to higher-dimensional domains. This is a key advantage in financial applications where the option price depends on multiple underlying factors and a fine discretization grid becomes prohibitively expensive.
+In this thesis PINNs are applied not only to the Black-Scholes equation but also to the Heston PDE, demonstrating how neural-network-based solvers can handle higher-dimenional option pricing problems governed by diffusion-type equations. 
 
-The broader challenge of solving high-dimensional PDEs with deep learning has attracted significant attention. \textcite{han2018solving} reformulated parabolic PDEs as backward stochastic differential equations and approximated their solutions using deep neural networks, demonstrating scalability to hundreds of dimensions. \textcite{sirignano2018dgm} proposed the Deep Galerkin Method (DGM), which trains neural networks to satisfy the differential operator and boundary conditions at random interior points — an approach closely related to PINNs and applicable to free-boundary problems arising in American option pricing. These works collectively establish the computational foundation that motivates the present study.
-
-While the Black--Scholes model assumes constant volatility, empirical financial markets exhibit stochastic volatility dynamics. A widely used extension is the Heston stochastic volatility model, in which both the asset price and its variance evolve as stochastic processes:
-\[
-dS_t = r S_t dt + \sqrt{v_t}\, S_t dW_t^S,
-\]
-\[
-dv_t = \kappa(\theta - v_t)dt + \xi \sqrt{v_t}\, dW_t^v,
-\]
-with correlation
-\[
-dW_t^S dW_t^v = \rho dt.
-\]
-
-In this setting, the option price becomes a function $V(S,v,t)$ and satisfies the two-dimensional Heston PDE
-\[
-\frac{\partial V}{\partial t}
-+
-\frac{1}{2} v S^2 \frac{\partial^2 V}{\partial S^2}
-+
-\rho \xi v S \frac{\partial^2 V}{\partial S \partial v}
-+
-\frac{1}{2} \xi^2 v \frac{\partial^2 V}{\partial v^2}
-\]
-\[
-+ \quad 
-rS \frac{\partial V}{\partial S}
-+
-\kappa(\theta - v)\frac{\partial V}{\partial v}
--
-rV
-=
-0.
-\]
-
-Compared to the Black--Scholes equation, the Heston PDE introduces an additional spatial dimension and a mixed derivative term, making classical numerical solution methods more computationally demanding. This increased complexity makes the model particularly well-suited for physics-informed machine learning approaches. In this thesis, PINNs are therefore applied not only to the Black--Scholes equation but also to the Heston PDE, demonstrating how neural-network-based solvers can handle higher-dimensional option pricing problems governed by diffusion-type equations.
-
-Beyond the forward problem of pricing, PINNs are also naturally suited for the \emph{inverse problem} of model calibration — recovering latent parameters such as the Heston volatility-of-volatility $\xi$, mean reversion speed $\kappa$, or correlation $\rho$ from observed market prices. Because all intermediate quantities are computed via automatic differentiation \parencite{paszke2019pytorch}, gradients with respect to model parameters flow through the solver itself, enabling gradient-based calibration without finite-difference approximations. This connection between forward solvers and differentiable calibration is a central motivation for the physics-informed approach explored in this work.
+Beyond the forward problem of pricing, PINNs are also 
 
 
-\subsection{The Black--Scholes Model}\label{subsection:bs}
+\subsection{Black-Scholes}
 
-The Black--Scholes model \parencite{abdelmessih2026visualoptions} prices a European call or put option analytically under the assumption of constant volatility. Given the log-moneyness variables $d_1$ and $d_2$,
-\[
-d_1 = \frac{\ln(S/K) + (r + \tfrac{1}{2}\sigma^2)T}{\sigma\sqrt{T}},
-\quad
-d_2 = d_1 - \sigma\sqrt{T},
-\]
-the call and put prices are
-\[
-C = S N(d_1) - K e^{-rT} N(d_2),
-\]
-\[
-P = K e^{-rT} N(-d_2) - S N(-d_1),
-\]
-where $S$ is the current asset price, $K$ the strike, $r$ the risk-free rate, $\sigma$ the volatility, $T$ the time to maturity, and $N(\cdot)$ the standard normal CDF.
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\linewidth]{figures/black3d.pdf}
+    \caption{Black-Scholes 3 dimensional surface}
+    \label{fig:black3d.pdf}
+\end{figure}
 
-\subsubsection*{The Greeks}
-
-The sensitivity of the option price to its inputs — the Greeks — are partial derivatives of $V$ with respect to market and model parameters. The first- and second-order Greeks are summarized in \cref{table:greeks}, together with selected third-order Greeks. The Black--Scholes PDE can be written compactly in terms of the first- and second-order Greeks as
-\[
-\Theta + \frac{1}{2}\sigma^2 S^2 \Gamma + rS\Delta - rV = 0,
-\]
-which makes explicit that the time decay $\Theta$ is balanced by gamma and delta exposure.
-
-\begin{table}[h]
-\centering
-\caption{Selected Black--Scholes Greeks.}\label{table:greeks}
-\begin{tabular}{lll}
-\toprule
-Greek & Expression & Order \\
-\midrule
-$\Delta$ & $\partial V/\partial S$ & 1st \\
-$\Theta$ & $\partial V/\partial t$ & 1st \\
-$\rho$ & $\partial V/\partial r$ & 1st \\
-$\Phi$ & $\partial V/\partial q$ & 1st \\
-Vega & $\partial V/\partial \sigma$ & 1st \\
-$\Gamma$ & $\partial^2 V/\partial S^2$ & 2nd \\
-Vomma & $\partial^2 V/\partial\sigma^2$ & 2nd \\
-Vanna & $\partial^2 V/\partial S\,\partial\sigma$ & 2nd \\
-Charm & $\partial^2 V/\partial S\,\partial t$ & 2nd \\
-Speed & $\partial^3 V/\partial S^3$ & 3rd \\
-Zomma & $\partial^3 V/\partial S^2\,\partial\sigma$ & 3rd \\
-Color & $\partial^3 V/\partial S^2\,\partial t$ & 3rd \\
-\bottomrule
-\end{tabular}
-\end{table}
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\linewidth]{figures/black2d.pdf}
+    \caption{Black-Scholes 2 dimensional}
+    \label{fig:black2d.pdf}
+\end{figure}
