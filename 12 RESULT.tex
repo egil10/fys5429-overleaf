@@ -133,12 +133,12 @@ This motivated the final $50\,000$-epoch training run. The longer run was intend
 
 The final Black--Scholes PINN was trained for $50\,000$ epochs. Training took approximately $12$ minutes and $8$ seconds on a GPU runtime. The final total loss was $0.102625$, and the logged loss history shows a steady reduction in all major components. The PDE residual decreased from $4.019\times 10^{-2}$ at initialization to approximately $2.1\times 10^{-3}$ by the end of the printed training history, while the initial-condition loss fell from $4398.76$ to below $2\times 10^{-2}$. The boundary-condition loss remained small throughout the later stages of training.
 
-\begin{figure}[H]
+\begin{figure*}[t]
     \centering
-    \includegraphics[width=\textwidth]{figures/pinn_bs.pdf}
+    \includegraphics[width=0.95\textwidth]{figures/pinn_bs.pdf}
     \caption{Final Black--Scholes PINN solution after $50\,000$ training epochs, compared with the analytical Black--Scholes call-price surface. The learned surface captures the main continuation-value structure and closely reproduces the shape of the analytical benchmark. The largest qualitative challenge remains the high-curvature region near the strike and near expiry, where the terminal payoff kink must be approximated by a smooth neural network.}
     \label{fig:pinn_bs.pdf}
-\end{figure}
+\end{figure*}
 
 The final surface comparison shows that the PINN captures the global shape of the Black--Scholes call-price surface. The model reproduces the low-price out-of-the-money region, the approximately linear in-the-money region for large $S$, and the smooth transition around the strike. This is the main qualitative evidence that the network has internalized the diffusion structure of the Black--Scholes PDE rather than merely fitting isolated points.
 
@@ -237,57 +237,183 @@ Overall, the Black--Scholes experiment is successful. The PINN learns a visually
 \clearpage
 \subsection{Heston}
 
+The Heston experiment extends the PINN framework from the two-dimensional Black--Scholes domain $(S,\tau)$ to the three-dimensional stochastic-volatility domain $(S,v,\tau)$. This is a substantially harder problem. The network must now learn how the option price changes not only with asset price and time to maturity, but also with the instantaneous variance state variable. In addition, the Heston PDE contains a mixed derivative term $\partial^2 V/\partial S \partial v$, which makes the differential constraint more demanding than in the Black--Scholes case.
+
+The Heston parameters were fixed at
+\[
+    \kappa = 2.0,
+    \qquad
+    \theta = 0.04,
+    \qquad
+    \xi = 0.3,
+    \qquad
+    \rho = -0.7,
+\]
+with $K=100$, $r=0.05$, $v_0=0.04$, $S_{\max}=300$, and $\tau_{\max}=1.0$. The collocation data consisted of $10\,000$ interior points, $2000$ initial-condition points, and boundary points sampled along the edges of the computational domain. As in the Black--Scholes experiment, the Heston model was first tuned through architecture, learning-rate, loss-weight, and convergence sweeps before training a final long-run PINN.
+
+The final Heston PINN was trained for $50\,000$ epochs using a three-hidden-layer network with $256$ neurons per layer, $\tanh$ activation, learning rate $5\times 10^{-3}$, and loss weights
+\[
+    \lambda_{\mathrm{pde}}=10,
+    \qquad
+    \lambda_{\mathrm{ic}}=10,
+    \qquad
+    \lambda_{\mathrm{bc}}=5.
+\]
+For the final training run, the boundary-condition loss was imposed on the lower asset-price boundary $S=0$, where the call option value is known to vanish.
+
 \subsubsection{Hyperparameters: architecture}
+
+The architecture sweep tested the same grid of depths, widths, and activation functions used in the Black--Scholes experiment: $2$, $3$, or $4$ hidden layers; $64$, $128$, or $256$ neurons per layer; and either \texttt{softplus} or $\tanh$ activation. Each model was trained for $5000$ epochs using the same baseline Heston parameters and loss weights.
 
 \begin{figure}[H]
     \centering
     \includegraphics[width=\linewidth]{figures/hyper_hs_arch_heatmap.pdf}
-    \caption{Architecture-search heatmap for the Heston PINN. The figure compares candidate network configurations and shows how model architecture affects the final training or validation loss.}
+    \caption{Architecture sweep for the Heston PINN after $5000$ epochs. The heatmaps compare PDE residual losses across depths, widths, and activation functions. As in the Black--Scholes case, $\tanh$ activations substantially outperform \texttt{softplus}. The best-performing models are wider $\tanh$ networks, reflecting the increased representational demands of the three-dimensional Heston price surface.}
     \label{fig:hyper_hs_arch_heatmap.pdf}
 \end{figure}
 
+The architecture results show a much sharper difficulty increase relative to Black--Scholes. Whereas the best Black--Scholes architecture achieved PDE losses of order $10^{-3}$ after $5000$ epochs, the best Heston architecture remains at order $1$. This is expected: the Heston PDE is higher-dimensional, contains variance dynamics, and includes the mixed derivative term generated by correlation between the asset and variance Brownian motions.
+
+The best architecture by PDE residual is the four-layer, $256$-neuron $\tanh$ model, with PDE loss $3.950807$. However, the three-layer, $256$-neuron $\tanh$ network is very close, reaching PDE loss $4.139890$, while being somewhat less computationally expensive. The final model therefore uses the three-layer, $256$-neuron $\tanh$ architecture as a practical compromise between accuracy and training cost.
+
+A second important observation is that all \texttt{softplus} networks perform poorly relative to the $\tanh$ networks. The best \texttt{softplus} architecture gives PDE loss $16.303411$, far above the leading $\tanh$ models. This suggests that, under the present setup, $\tanh$ provides a more effective basis for representing the Heston price surface and its derivatives.
+
 \subsubsection{Hyperparameters: learning rate}
+
+The learning-rate sweep was performed using the selected $\tanh$ architecture with three hidden layers and $256$ neurons per layer. The tested learning rates were
+\[
+    10^{-2},
+    \quad
+    5\times 10^{-3},
+    \quad
+    10^{-3},
+    \quad
+    5\times 10^{-4},
+    \quad
+    10^{-4}.
+\]
+Each run was trained for $5000$ epochs.
 
 \begin{figure}[H]
     \centering
     \includegraphics[width=\linewidth]{figures/hyper_hs_lr_ranked.pdf}
-    \caption{Ranked comparison of learning-rate choices for the Heston PINN. The figure identifies which learning rates produce the most accurate and stable optimization behavior under the tested setup.}
+    \caption{Learning-rate sweep for the Heston PINN. The best PDE residual is obtained with learning rate $5\times 10^{-3}$. Lower learning rates converge more slowly over the fixed epoch budget, while $10^{-2}$ is too aggressive and leads to substantially worse PDE residual performance.}
     \label{fig:hyper_hs_lr_ranked.pdf}
 \end{figure}
 
-\subsubsection{Hyperparameters: lambda values}
+The best learning rate is $5\times 10^{-3}$, giving PDE loss $3.668460$ after $5000$ epochs. The learning rates $5\times 10^{-4}$ and $10^{-3}$ also perform reasonably, with PDE losses $3.861612$ and $3.911578$, respectively. In contrast, $10^{-4}$ is too slow for the fixed training budget, while $10^{-2}$ appears too aggressive and produces a much larger PDE loss of $17.676699$.
+
+This result differs from the Black--Scholes case, where several moderate learning rates performed similarly. For Heston, the optimization landscape is more sensitive. The model needs a sufficiently large learning rate to escape the initially poor payoff approximation, but not so large that the PDE residual becomes unstable. The value $5\times 10^{-3}$ was therefore used in the subsequent Heston experiments.
+
+\subsubsection{Hyperparameters: loss weights}
+
+The loss-weight sweep varied the PDE and initial-condition weights while holding the boundary-condition weight fixed:
+\[
+    \lambda_{\mathrm{pde}} \in \{10,15,20,25,30\},
+    \qquad
+    \lambda_{\mathrm{ic}} \in \{5,10,15,20\},
+    \qquad
+    \lambda_{\mathrm{bc}}=5.
+\]
+Each configuration was trained for $5000$ epochs.
 
 \begin{figure}[H]
     \centering
     \includegraphics[width=\linewidth]{figures/hyper_hs_lambda_heatmap.pdf}
-    \caption{Loss-weight heatmap for the Heston PINN across the tested $\lambda$ configurations. The figure shows how the relative weighting of PDE, initial-condition, and boundary-condition terms affects overall model performance.}
+    \caption{Loss-weight sweep for the Heston PINN with $\lambda_{\mathrm{bc}}=5$ fixed. The heatmap reports the final PDE residual loss for each tested pair $(\lambda_{\mathrm{pde}},\lambda_{\mathrm{ic}})$. The best short-run PDE residual is obtained near $\lambda_{\mathrm{pde}}=25$ and $\lambda_{\mathrm{ic}}=5$, although the final model uses a more balanced weighting to stabilize the longer training run.}
     \label{fig:hyper_hs_lambda_heatmap.pdf}
 \end{figure}
 
-\subsubsection{Hyperparameters: convergence (epochs)}
+The lowest PDE residual in the sweep is achieved at
+\[
+    \lambda_{\mathrm{pde}}=25,
+    \qquad
+    \lambda_{\mathrm{ic}}=5,
+\]
+with PDE loss $3.287135$. The neighboring configuration $(20,5)$ is also competitive, with PDE loss $3.390135$. These results indicate that, in short training runs, emphasizing the PDE residual more strongly than the initial condition improves interior equation satisfaction.
+
+However, the Heston problem requires a more careful balance than the Black--Scholes benchmark. A configuration that minimizes the PDE loss over $5000$ epochs does not necessarily produce the best final surface or the most stable long-run training. The final model therefore uses
+\[
+    \lambda_{\mathrm{pde}}=10,
+    \qquad
+    \lambda_{\mathrm{ic}}=10,
+    \qquad
+    \lambda_{\mathrm{bc}}=5,
+\]
+which gives a more balanced treatment of the PDE residual and terminal payoff during the full $50\,000$-epoch training run. This is especially important because the payoff condition remains difficult to enforce in the higher-dimensional Heston setting.
+
+\subsubsection{Hyperparameters: convergence}
+
+The convergence sweep fixed the architecture, learning rate, and loss weights, while varying the number of training epochs:
+\[
+    5000,
+    \quad
+    10000,
+    \quad
+    15000,
+    \quad
+    20000,
+    \quad
+    25000.
+\]
 
 \begin{figure}[H]
     \centering
     \includegraphics[width=\linewidth]{figures/hyper_hs_conv_ranked.pdf}
-    \caption{Ranked comparison of Heston PINN convergence experiments across different epoch budgets. The figure illustrates how additional training changes final loss and where the benefits of longer optimization begin to diminish.}
+    \caption{Epoch-budget sweep for the Heston PINN. Longer training consistently improves the PDE residual over the tested range, although the residual remains much larger than in the Black--Scholes experiment. This reflects the additional dimensionality, variance dependence, and mixed derivative term in the Heston PDE.}
     \label{fig:hyper_hs_conv_ranked.pdf}
 \end{figure}
 
-\clearpage\subsubsection{Heston PINN}
+The convergence results show a monotonic improvement in PDE residual as training duration increases. The PDE loss falls from $6.199924$ after $5000$ epochs to $3.463765$ after $10\,000$ epochs, and further to $2.064686$ after $25\,000$ epochs. The initial-condition loss and total loss also decrease over the same range.
+
+This confirms that the Heston PINN benefits materially from longer optimization. The higher-dimensional PDE does not converge as rapidly as the Black--Scholes model, and the short-run sweeps therefore understate the quality that can be achieved with longer training. This motivated the final $50\,000$-epoch training run.
+
+\clearpage
+\subsubsection{Final Heston PINN}
+
+The final Heston PINN was trained for $50\,000$ epochs. Training took approximately $23$ minutes and $30$ seconds on a GPU runtime. The final run used $10\,000$ interior collocation points, $2000$ initial-condition points, and $250$ lower-boundary points at $S=0$. The final total loss was $0.384823$.
+
+The loss history shows that the Heston optimization is less smooth than the Black--Scholes case. The PDE and initial-condition losses exhibit occasional spikes during training, especially in the earlier and middle parts of the run. Nevertheless, the overall trend is strongly downward. By the later stages, the model reaches substantially lower PDE, initial-condition, and boundary losses than in the short hyperparameter sweeps. This supports the interpretation that the Heston PINN is trainable, but more sensitive to optimization dynamics than the Black--Scholes PINN.
 
 \begin{figure}[H]
     \centering
     \includegraphics[width=\textwidth]{figures/pinn_hs.pdf}
-    \caption{Caption}
-    \label{fig:placeholder}
+    \caption{Final Heston PINN solution after $50\,000$ training epochs, evaluated on the slice $v=v_0=0.04$ and compared with the semi-analytical Heston reference solution. The PINN captures the global structure of the Heston call-price surface, including the low-value out-of-the-money region and the increasing in-the-money region. The comparison is shown on a fixed-variance slice, so the full three-dimensional dependence on $(S,v,\tau)$ is only partially visualized.}
+    \label{fig:pinn_hs.pdf}
 \end{figure}
+
+The final surface comparison indicates that the Heston PINN captures the main structure of the semi-analytical Heston solution on the slice $v=v_0=0.04$. The learned surface has the correct qualitative shape: option values are close to zero in deep out-of-the-money regions, increase with the underlying asset price, and vary smoothly with time to maturity. As expected, the surface is harder to learn than in the Black--Scholes case, since the plotted slice represents only one cross-section of a higher-dimensional learned function.
+
+The model was evaluated quantitatively at the at-the-money point
+\[
+    S=K=100,
+    \qquad
+    v=v_0=0.04,
+    \qquad
+    \tau=0.5.
+\]
+At this point, the PINN predicts
+\[
+    V_{\mathrm{PINN}} = 6.830489,
+\]
+while the semi-analytical Heston benchmark gives
+\[
+    V_{\mathrm{Heston}} = 6.837137.
+\]
+The absolute pricing error is therefore
+\[
+    |V_{\mathrm{PINN}}-V_{\mathrm{Heston}}|
+    =
+    0.006648,
+\]
+corresponding to a relative error of approximately $0.10\%$. This is a strong pointwise pricing result, especially given the increased dimensionality of the Heston problem.
 
 \begin{table}[H]
     \centering
     \small
     \setlength{\tabcolsep}{6pt}
     \renewcommand{\arraystretch}{1.18}
-    \caption{Heston PINN-estimated option price, Greeks, and PDE residual.}
+    \caption{Heston PINN-estimated option price, selected Greeks, and PDE residual at $S=K=100$, $v=v_0=0.04$, and $\tau=0.5$. The semi-analytical Heston price is included as the benchmark.}
     \label{tab:heston_pinn_greeks}
     \begin{tabularx}{\linewidth}{@{} l X r @{}}
         \toprule
@@ -300,7 +426,7 @@ Overall, the Black--Scholes experiment is successful. The PINN learns a visually
             & $6.830489$ \\
 
         \addlinespace[0.25em]
-        \multicolumn{3}{@{}l}{\textbf{First-order}} \\
+        \multicolumn{3}{@{}l}{\textbf{First-order sensitivities}} \\
         Delta $(\Delta)$
             & $\partial V / \partial S$
             & $0.645494$ \\
@@ -312,14 +438,14 @@ Overall, the Black--Scholes experiment is successful. The PINN learns a visually
             & $8.028887$ \\
 
         \addlinespace[0.25em]
-        \multicolumn{3}{@{}l}{\textbf{Second-order}} \\
+        \multicolumn{3}{@{}l}{\textbf{Second-order sensitivities}} \\
         Gamma $(\Gamma)$
             & $\partial^2 V / \partial S^2$
             & $0.026912$ \\
         Volga$_v$
             & $\partial^2 V / \partial v^2$
             & $-286.995544$ \\
-        Vanna
+        Vanna$_v$
             & $\partial^2 V / \partial S \partial v$
             & $-0.408809$ \\
         Charm
@@ -327,11 +453,11 @@ Overall, the Black--Scholes experiment is successful. The PINN learns a visually
             & $0.131729$ \\
 
         \addlinespace[0.25em]
-        \multicolumn{3}{@{}l}{\textbf{Third-order}} \\
+        \multicolumn{3}{@{}l}{\textbf{Third-order sensitivities}} \\
         Speed
             & $\partial^3 V / \partial S^3$
             & $-0.001735$ \\
-        Zomma
+        Zomma$_v$
             & $\partial^3 V / \partial S^2 \partial v$
             & $-0.210728$ \\
         Color
@@ -343,14 +469,20 @@ Overall, the Black--Scholes experiment is successful. The PINN learns a visually
             & Goal: $0.0$
             & $\mathbf{-6.628036 \times 10^{-2}}$ \\
         \textbf{Analytical price}
-            & --
+            & Semi-analytical Heston benchmark
             & $\mathbf{6.837137}$ \\
         \textbf{PINN error}
-            & $|V_{\mathrm{PINN}} - V_{\mathrm{analytical}}|$
+            & $|V_{\mathrm{PINN}} - V_{\mathrm{Heston}}|$
             & $\mathbf{0.006648}$ \\
         \bottomrule
     \end{tabularx}
 \end{table}
+
+The Greek estimates are qualitatively reasonable. Delta is positive and below one, as expected for an at-the-money call. Gamma is positive, indicating local convexity with respect to the underlying asset price. The variance sensitivity Vega$_v$ is large and positive, consistent with the intuition that higher instantaneous variance increases the value of optionality. The negative Volga$_v$ indicates concavity of the learned price surface in the local variance direction at the evaluation point.
+
+At the same time, the Heston results should be interpreted more cautiously than the Black--Scholes results. The pointwise pricing error is very small, but the local PDE residual is $-6.628036\times 10^{-2}$, which is larger in magnitude than the Black--Scholes residual. This gap highlights an important feature of PINNs: accurate pricing at a selected point does not necessarily imply equally strong global PDE satisfaction. In the Heston setting, the model can learn an accurate local price while still finding it difficult to fully satisfy the higher-dimensional PDE everywhere.
+
+The Heston experiment is therefore successful, but less clean than the Black--Scholes benchmark. The final PINN achieves an excellent pointwise price match to the semi-analytical Heston solution and produces meaningful state-variable Greeks through automatic differentiation. However, the hyperparameter sweeps and loss history show that the optimization landscape is substantially more difficult. The model requires wider networks, larger learning rates, longer training, and careful interpretation of residual diagnostics. This provides the natural bridge to the inverse calibration problem, where the difficulty increases further because the Heston parameters themselves must be learned from data.
 
 
 \clearpage\subsection{Inverse problem}
