@@ -93,26 +93,26 @@
             \hline
             \textbf{Epoch} & \textbf{Total} & \textbf{PDE} & \textbf{IC} & \textbf{BC} \\
             \hline
-                 0 & $46860.6875$ & $0.03398$  & $4686.0298$ & $0.01044$ \\
-              2500 & $137.51643$  & $9.55106$  & $3.99954$   & $0.40209$ \\
-              5000 & $125.37741$  & $5.42175$  & $7.08815$   & $0.05568$ \\
-              7500 & $58.41161$   & $1.91550$  & $3.91287$   & $0.02558$ \\
-             10000 & $202.79363$  & $17.57729$ & $2.69334$   & $0.01747$ \\
-             12500 & $266.89291$  & $21.35045$ & $5.33818$   & $0.00133$ \\
-             15000 & $50.37729$   & $4.27836$  & $0.75459$   & $0.00957$ \\
-             17500 & $47.02234$   & $2.73344$  & $1.95774$   & $0.02211$ \\
-             20000 & $35.66247$   & $1.98122$  & $1.57846$   & $0.01313$ \\
-             22500 & $18.46533$   & $1.19200$  & $0.65409$   & $0.00090$ \\
-             25000 & $10.65871$   & $0.89655$  & $0.16848$   & $0.00168$ \\
-             27500 & $7.28630$    & $0.35398$  & $0.37364$   & $0.00202$ \\
-             30000 & $5.99006$    & $0.27701$  & $0.32107$   & $0.00186$ \\
-             32500 & $2.35999$    & $0.13831$  & $0.09759$   & $0.00020$ \\
-             35000 & $1.87818$    & $0.09468$  & $0.09288$   & $0.00052$ \\
-             37500 & $1.40915$    & $0.06286$  & $0.07782$   & $0.00047$ \\
-             40000 & $1.19361$    & $0.05294$  & $0.06630$   & $0.00024$ \\
-             42500 & $0.86779$    & $0.02564$  & $0.06107$   & $0.00015$ \\
-             45000 & $0.63638$    & $0.01763$  & $0.04598$   & $0.00007$ \\
-             47500 & $0.53413$    & $0.01536$  & $0.03803$   & $0.00005$ \\
+                 0 & $251692.2969$ & $0.03398$   & $4686.0298$ & $40966.3320$ \\
+              2500 & $2825.07788$  & $188.86124$ & $82.19197$  & $22.90919$ \\
+              5000 & $2080.96826$  & $116.06000$ & $34.98023$  & $114.11321$ \\
+              7500 & $492.30597$   & $32.44241$  & $13.90004$  & $5.77630$ \\
+             10000 & $244.53905$   & $12.81886$  & $9.48032$   & $4.30945$ \\
+             12500 & $306.85504$   & $20.54513$  & $7.70190$   & $4.87695$ \\
+             15000 & $421.74133$   & $23.56755$  & $11.81930$  & $13.57456$ \\
+             17500 & $1769.61401$  & $92.72594$  & $23.29924$  & $121.87243$ \\
+             20000 & $97.64471$    & $3.14415$   & $3.17083$   & $6.89899$ \\
+             22500 & $320.85370$   & $18.72681$  & $2.79603$   & $21.12504$ \\
+             25000 & $72.54399$    & $1.39077$   & $2.41323$   & $6.90079$ \\
+             27500 & $77.87282$    & $2.30286$   & $2.48623$   & $5.99639$ \\
+             30000 & $41.28610$    & $3.38855$   & $0.55816$   & $0.36379$ \\
+             32500 & $27.03453$    & $1.55174$   & $0.35608$   & $1.59127$ \\
+             35000 & $13.38450$    & $0.33137$   & $0.50636$   & $1.00144$ \\
+             37500 & $9.27743$     & $0.32270$   & $0.34799$   & $0.51411$ \\
+             40000 & $4.70522$     & $0.18073$   & $0.21513$   & $0.14932$ \\
+             42500 & $2.72396$     & $0.06335$   & $0.12588$   & $0.16633$ \\
+             45000 & $1.38333$     & $0.04318$   & $0.08533$   & $0.01965$ \\
+             47500 & $1.04974$     & $0.03381$   & $0.07039$   & $0.00156$ \\
             \hline
         \end{tabular}
     \end{minipage}
@@ -161,17 +161,61 @@
 \noindent\footnotesize
 \textbf{Notes for Tables~\ref{tab:bs_training_loss_history}--\ref{tab:inverse_pinn_calibration_history}.}
 \textbf{(BS)} 50000 epochs in 12\,min 8\,s; 6250 points (5000 interior, 1000 IC, 250 BC); final total loss $0.102625$.
-\textbf{(Heston)} 50000 epochs in 9\,min 7\,s; 12250 points (10000 interior, 2000 IC, 250 BC); final total loss $0.485010$.
-\textbf{(Inverse)} 30000 epochs in 16\,min 27\,s; final losses --- total $17.3094$, PDE $0.533012$, data $0.0030$; final calibrated $\kappa=1.588$, $\theta=0.0266$, $\xi=0.104$, $\rho=0.994$.
+\textbf{(Heston)} 50000 epochs in 24\,min 40\,s; 12500 points (10000 interior, 2000 IC, 250 lower-$S$ BC, 250 upper-$S$ BC); final total loss $0.921236$.
+\textbf{(Inverse)} 30000 epochs in 16\,min 17\,s; final losses --- total $17.3094$, PDE $0.533012$, data $0.0030$; final calibrated $\kappa=1.588$, $\theta=0.0266$, $\xi=0.104$, $\rho=0.994$.
 \normalsize
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
+\subsection{Black--Scholes PINN}
 
-\clearpage\subsection{Black-Scholes PINN}
+\begin{figure}[H]
+    \centering
 
+    \begin{subfigure}[t]{0.65\linewidth}
+        \centering
+        \includegraphics[width=\linewidth]{figures/hyper_bs_arch_ranked.pdf}
+        \caption{Architecture ranking.}
+    \end{subfigure}
+
+    \vspace{0.35em}
+
+    \begin{subfigure}[t]{0.65\linewidth}
+        \centering
+        \includegraphics[width=\linewidth]{figures/hyper_bs_lr_ranked.pdf}
+        \caption{Learning-rate ranking.}
+    \end{subfigure}
+
+    \vspace{0.35em}
+
+    \begin{subfigure}[t]{0.65\linewidth}
+        \centering
+        \includegraphics[width=\linewidth]{figures/hyper_bs_ranked.pdf}
+        \caption{Loss-weight ranking.}
+    \end{subfigure}
+
+    \vspace{0.35em}
+
+    \begin{subfigure}[t]{0.65\linewidth}
+        \centering
+        \includegraphics[width=\linewidth]{figures/hyper_bs_conv_ranked.pdf}
+        \caption{Epoch-budget ranking.}
+    \end{subfigure}
+
+    \caption{Ranked Black--Scholes hyperparameter sweeps. The panels summarize the architecture, learning-rate, loss-weight, and epoch-budget experiments used to select the final Black--Scholes PINN configuration.}
+    \label{fig:hyper_bs_ranked_all_appendix}
+\end{figure}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+
+
+\clearpage
 \begin{figure}[H]
     \centering
 

@@ -90,6 +90,87 @@ The corresponding Heston pricing PDE is
 
 Compared with the Black--Scholes PDE, the Heston equation introduces both an additional spatial dimension and a mixed derivative term. This makes grid-based numerical methods more demanding, because the computational cost grows rapidly as extra state variables are added. The Heston model is therefore a natural test case for PINNs, whose mesh-free formulation can sample the higher-dimensional domain without constructing a full tensor-product grid.
 
+\subsection{Neural-network approximation}
+
+Before introducing the full PINN loss, it is useful to specify the neural-network function class used to approximate the option-price surface. In this project, the unknown pricing function is represented by a fully connected feed-forward neural network, implemented in PyTorch using the \texttt{torch.nn.Module} interface \parencite{paszke2019pytorch,pytorch_docs}. The network is a multilayer perceptron composed of affine transformations, smooth nonlinear activation functions, and a final scalar output layer.
+
+For the Black--Scholes model, the neural network takes the two-dimensional input $(S,\tau)$ and approximates the call-price surface as
+\begin{equation}
+    V_\theta(S,\tau) \approx V(S,\tau),
+\end{equation}
+whereas for the Heston model the input is extended to $(S,v,\tau)$:
+\begin{equation}
+    V_\theta(S,v,\tau) \approx V(S,v,\tau).
+\end{equation}
+Here $\theta$ denotes the full collection of trainable weights and biases.
+
+A fully connected network with $L$ hidden layers can be written recursively as
+\begin{align}
+    \mathbf{z}^{(0)} &= \mathbf{x}, \\
+    \mathbf{z}^{(\ell)}
+    &=
+    \phi\!\left(
+        W^{(\ell)}\mathbf{z}^{(\ell-1)}
+        +
+        \mathbf{b}^{(\ell)}
+    \right),
+    \qquad \ell=1,\ldots,L, \\
+    V_\theta(\mathbf{x})
+    &=
+    W^{(L+1)}\mathbf{z}^{(L)}
+    +
+    \mathbf{b}^{(L+1)}.
+\end{align}
+For Black--Scholes, $\mathbf{x}=(S,\tau)$, while for Heston, $\mathbf{x}=(S,v,\tau)$. In the implementation, these inputs are normalized before being passed through the network. For example, the Heston network uses
+\begin{equation}
+    \widetilde{\mathbf{x}}
+    =
+    \left(
+        \frac{S}{S_{\max}},
+        \frac{v}{v_{\max}},
+        \frac{\tau}{T_{\max}}
+    \right),
+\end{equation}
+which improves numerical conditioning by keeping the input variables on comparable scales.
+
+The hidden layers are implemented using \texttt{nn.Linear} layers in PyTorch. In the Heston case, the network has the schematic form
+\begin{equation}
+    \mathbb{R}^3
+    \longrightarrow
+    \mathbb{R}^{m}
+    \longrightarrow
+    \cdots
+    \longrightarrow
+    \mathbb{R}^{m}
+    \longrightarrow
+    \mathbb{R},
+\end{equation}
+where $m$ is the number of neurons per hidden layer. The scalar output is interpreted directly as the option value.
+
+The activation functions considered in the hyperparameter sweeps were $\tanh$ and \texttt{softplus}, defined by
+\begin{align}
+    \tanh(x)
+    &=
+    \frac{e^x-e^{-x}}{e^x+e^{-x}}, \\
+    \mathrm{softplus}(x)
+    &=
+    \log(1+e^x).
+\end{align}
+Both activation functions are smooth, which is important in the PINN setting because the PDE residual requires first-order, second-order, and mixed derivatives of the neural-network output. Non-smooth activations such as ReLU are less natural here, since their second derivatives are zero or undefined almost everywhere.
+
+Weights were initialized using Xavier normal initialization, with biases initialized to zero. This initialization is standard for feed-forward neural networks and helps prevent activations from becoming too large or too small at the start of training. The trainable parameters were optimized using the Adam optimizer, and the final training runs used a cosine-annealing learning-rate schedule. In simplified notation, the parameter update can be written as
+\begin{equation}
+    \theta_{n+1}
+    =
+    \theta_n
+    -
+    \eta_n
+    \widehat{\nabla_\theta \mathcal{L}}(\theta_n),
+\end{equation}
+where $\eta_n$ is the learning rate at iteration $n$ and $\widehat{\nabla_\theta \mathcal{L}}$ denotes Adam's adaptive moment-based gradient estimate.
+
+The final Black--Scholes PINN used two hidden layers, $256$ neurons per layer, $\tanh$ activation, and learning rate $5\times 10^{-4}$. The final Heston PINN used three hidden layers, $256$ neurons per layer, $\tanh$ activation, and learning rate $5\times 10^{-3}$. These choices were selected empirically from the hyperparameter sweeps reported in the Results section.
+
 \subsection{Physics-Informed Neural Networks (PINNs)}
 
 A PINN approximates the option-price function by a neural network
@@ -198,7 +279,7 @@ Since the project considers both the Black--Scholes and Heston models, two types
 
 The distinction between $\sigma$-Greeks and $v$-Greeks is important. In the Black--Scholes model, Vega, Vomma, Vanna, and Zomma describe sensitivity to the constant volatility parameter. In the Heston model, volatility enters through the variance state variable, and the corresponding quantities measure how the learned price surface changes along the variance dimension. Thus, the Heston quantities Vega$_v$, Volga$_v$, Vanna$_v$, and Zomma$_v$ should be interpreted as variance-state sensitivities rather than direct Black--Scholes volatility sensitivities.
 
-\begin{table}[H]
+\begin{table}[!htbp]
     \centering
     \small
     \setlength{\tabcolsep}{4pt}
@@ -341,27 +422,40 @@ The main sampling emphasis is placed around $S=K$, where the payoff kink creates
 
 \subsubsection{Heston forward problem}
 
-The Heston forward problem extends the input domain from $(S,\tau)$ to $(S,v,\tau)$. This increases the dimensionality of the learning problem and introduces a mixed derivative term in the PDE residual. To maintain sufficient coverage of the enlarged domain, the number of interior collocation points is increased relative to the Black--Scholes case.
+The Heston forward problem extends the input domain from $(S,\tau)$ to $(S,v,\tau)$. This increases the dimensionality of the learning problem and introduces the mixed derivative term $\partial^2 V/\partial S\partial v$ in the PDE residual. To maintain sufficient coverage of the enlarged domain, the number of interior collocation points is increased relative to the Black--Scholes case.
+
+The generated Heston collocation set contains interior points, terminal payoff points, and candidate boundary points on the asset-price and variance boundaries. In the final Heston PINN, however, only the two asset-price boundaries are imposed in the boundary loss. The lower boundary uses the exact call-option condition
+\begin{equation}
+    V(0,v,\tau)=0,
+\end{equation}
+while the upper boundary uses the asymptotic approximation
+\begin{equation}
+    V(S_{\max},v,\tau)\approx S_{\max}-Ke^{-r\tau}.
+\end{equation}
+The variance-boundary points at $v=v_{\min}$ and $v=v_{\max}$ are generated but not imposed as hard zero-value boundary conditions, since the correct limiting behavior in the variance direction is less direct and should not be treated as $V=0$.
 
 \begin{table}[!htbp]
     \centering
     \small
     \setlength{\tabcolsep}{6pt}
     \renewcommand{\arraystretch}{1.18}
-    \caption{Heston collocation set summary.}
+    \caption{Heston collocation set summary. The generated dataset includes candidate variance-boundary points, but the final Heston PINN imposes boundary penalties only on the two asset-price boundaries.}
     \label{tab:hs_collocation_summary}
     \begin{tabularx}{\linewidth}{@{} X r @{}}
         \toprule
         \textbf{Quantity} & \textbf{Value} \\
         \midrule
 
-        \multicolumn{2}{@{}l}{\textbf{Collocation points}} \\
+        \multicolumn{2}{@{}l}{\textbf{Collocation points used in final training}} \\
         Interior points & $10000$ \\
         Initial-condition points & $2000$ \\
-        Boundary $S$ lower & $250$ \\
-        Boundary $S$ upper & $250$ \\
-        Boundary $v$ lower & $250$ \\
-        Boundary $v$ upper & $250$ \\
+        Boundary $S=0$ & $250$ \\
+        Boundary $S=S_{\max}$ & $250$ \\
+
+        \addlinespace[0.25em]
+        \multicolumn{2}{@{}l}{\textbf{Generated but not imposed in final boundary loss}} \\
+        Boundary $v=v_{\min}$ & $250$ \\
+        Boundary $v=v_{\max}$ & $250$ \\
 
         \addlinespace[0.25em]
         \multicolumn{2}{@{}l}{\textbf{Domain}} \\
@@ -373,7 +467,7 @@ The Heston forward problem extends the input domain from $(S,\tau)$ to $(S,v,\ta
     \end{tabularx}
 \end{table}
 
-The Heston sampling strategy again clusters points near the strike and near expiry, but also places emphasis around the relevant variance region. This is important because the model must learn not only the price dependence on $S$ and $\tau$, but also how the option surface deforms as variance changes.
+The Heston sampling strategy again clusters points near the strike and near expiry, but also places emphasis around the relevant variance region. This is important because the model must learn not only the price dependence on $S$ and $\tau$, but also how the option surface deforms as variance changes. The final boundary treatment focuses on the two financially interpretable asset-price boundaries while avoiding artificial zero-value constraints in the variance direction.
 
 \subsubsection{Heston inverse problem}
 
