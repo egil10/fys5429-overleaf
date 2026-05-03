@@ -1,2 +1,31 @@
 \section{Conclusion}\label{section:conclusion}
 
+This project studied Physics-Informed Neural Networks as mesh-free solvers for option-pricing PDEs. The motivation came from the diffusion structure of the Black--Scholes equation: after a suitable change of variables, the pricing problem is closely connected to the heat equation. This makes option pricing a natural setting for PINNs, since the goal is to learn a smooth function whose derivatives satisfy a governing PDE while also respecting payoff and boundary conditions.
+
+The first experiment used the Black--Scholes model as a controlled benchmark. This was the cleanest test case because the analytical solution is known and the pricing surface depends only on asset price and time to maturity. The final Black--Scholes PINN reproduced the analytical call-price surface well. At the evaluation point $S=K=100$ and $\tau=0.5$, the model predicted $V_{\mathrm{PINN}}=6.927159$, compared with the analytical value $V_{\mathrm{BS}}=6.888729$. The absolute error was therefore $0.038430$, corresponding to approximately $0.56\%$ relative error. The local PDE residual was $2.746582\times 10^{-3}$, and the automatically differentiated Greeks were qualitatively consistent with the expected behavior of an at-the-money call option. This confirms that, for the Black--Scholes benchmark, the PINN learned both a useful price approximation and a differentiable representation of the solution surface.
+
+The second experiment extended the same framework to the Heston stochastic-volatility model. This problem is substantially more difficult because the network must learn a function of $(S,v,\tau)$ and satisfy a PDE containing both variance dynamics and a mixed derivative term. The final Heston PINN was trained with boundary conditions imposed on both $S=0$ and $S=S_{\max}$, giving a more globally constrained model than the earlier lower-boundary-only version. On the fixed-variance slice $v=v_0=0.04$, the model predicted $V_{\mathrm{PINN}}=6.806941$ at $S=K=100$ and $\tau=0.5$, compared with the semi-analytical Heston value $V_{\mathrm{Heston}}=6.837137$. This gives an absolute error of $0.030196$, or approximately $0.44\%$. The pointwise price accuracy is therefore strong, but the local PDE residual of $-1.790738\times 10^{-1}$ and the less stable loss history show that the Heston problem is considerably harder than Black--Scholes. The experiment demonstrates that PINNs can approximate higher-dimensional stochastic-volatility pricing surfaces, but also that PDE satisfaction becomes more delicate as the model complexity increases.
+
+The third experiment considered inverse Heston calibration. Here, the PINN was no longer used only as a forward solver; instead, the Heston parameters $\kappa$, $\theta$, $\xi$, and $\rho$ were optimized jointly with the neural-network weights using noisy synthetic market prices. The inverse PINN fit the synthetic option prices very accurately. The final mean absolute pricing error was $0.028566$, the maximum absolute error was $0.218854$, the median relative error was approximately $0.02\%$, and the parity diagnostics gave $R^2=0.999999$. From a pure price-fitting perspective, the model was therefore highly successful.
+
+However, the inverse calibration experiment also revealed the central limitation of the approach. Despite the excellent price fit, the recovered Heston parameters were not close to the true data-generating values. The final estimates were
+\begin{align*}
+    \kappa &= 1.588 \\
+    \theta &= 0.0266 \\
+    \xi    &= 0.104 \\
+    \rho   &= 0.994
+\end{align*}
+whereas the true parameters were
+\begin{align*}
+    \kappa_{\mathrm{true}} &= 2.0 \\
+    \theta_{\mathrm{true}} &= 0.04 \\
+    \xi_{\mathrm{true}}    &= 0.3 \\
+    \rho_{\mathrm{true}}   &= -0.7
+\end{align*}
+The most serious failure is the correlation parameter, which converges to a large positive value even though the true value is negative. This shows that the inverse PINN found a price-consistent representation of the data, but not the correct structural Heston parameters.
+
+The main conclusion is therefore two-sided. For forward pricing, PINNs work well in this project. They produce accurate option prices, visually plausible price surfaces, and useful derivatives through automatic differentiation. The Black--Scholes case is especially clean, while the Heston case remains accurate in price but more challenging in residual diagnostics. For inverse calibration, the framework is promising but not yet reliable as a structural parameter-recovery method. The model can fit prices extremely well, but price fit alone does not guarantee parameter identifiability.
+
+This distinction is important for financial applications. A differentiable model that interpolates option prices can still be valuable as a fast pricing engine or sensitivity generator. However, if the goal is to infer economically meaningful parameters, the calibration problem needs additional structure. Future work should therefore focus on richer market-data designs across strikes, maturities, and variance states; stronger regularization of $\xi$ and $\rho$; improved parameter constraints; alternative loss-balancing strategies; and comparison with classical calibration methods. It would also be useful to evaluate the learned surfaces on larger out-of-sample grids rather than only at selected points.
+
+Overall, the project shows that PINNs provide a powerful and flexible framework for financial PDEs. They are particularly attractive because the same model can represent the price surface, enforce the PDE, compute Greeks, and in principle calibrate latent parameters through automatic differentiation. The forward experiments demonstrate this potential clearly. The inverse experiment gives a more cautious but valuable result: PINNs can fit observed option prices, but reliable structural calibration remains a harder identification problem.
