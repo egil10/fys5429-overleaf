@@ -343,26 +343,18 @@
 
 \begin{figure}[H]
     \centering
-
-    \begin{subfigure}[t]{0.8\linewidth}
-        \centering
-        \includegraphics[width=\linewidth]{figures/pinn_inv_losses.pdf}
-        \caption{Loss decomposition for the inverse PINN calibration. The figure tracks the optimization objective and its constituent terms, showing how the model balances PDE consistency, boundary and initial conditions, market-data fit, and regularization during training.}
-        \label{fig:pinn_inv_losses.pdf}
-    \end{subfigure}
-
-    \vspace{0.55cm}
-
-    \begin{subfigure}[t]{0.8\linewidth}
-        \centering
-        \includegraphics[width=\linewidth]{figures/pinn_inv_params.pdf}
-        \caption{Estimated Heston parameters during inverse PINN calibration. The figure shows the evolution of $\kappa$, $\theta$, $\xi$, and $\rho$, giving a direct view of parameter convergence and stability across epochs.}
-        \label{fig:pinn_inv_params.pdf}
-    \end{subfigure}
-
-    \caption{Inverse PINN calibration diagnostics. The upper panel summarizes loss convergence, while the lower panel shows the corresponding evolution of the calibrated Heston parameters.}
-    \label{fig:pinn_inv_diagnostics_panel}
+    \includegraphics[width=\textwidth]{figures/pinn_inv_losses.pdf}
+    \caption{Loss decomposition for the inverse PINN calibration. The figure tracks the optimization objective and its constituent terms, showing how the model balances PDE consistency, boundary and initial conditions, market-data fit, and regularization during training.}
+    \label{fig:pinn_inv_losses}
 \end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{figures/pinn_inv_params.pdf}
+    \caption{Estimated Heston parameters during inverse PINN calibration. The figure shows the evolution of $\kappa$, $\theta$, $\xi$, and $\rho$, giving a direct view of parameter convergence and stability across epochs.}
+    \label{fig:pinn_inv_params}
+\end{figure}
+
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
