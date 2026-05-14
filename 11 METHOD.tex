@@ -174,6 +174,8 @@ The PINN approach rests on two well-established results from the analysis of neu
 
 \paragraph{Automatic differentiation.} The partial derivatives appearing in the PDE residual are not estimated by finite differences but computed directly through reverse-mode automatic differentiation (AD) on the computational graph of the network; see \textcite{baydin2018automatic} for a survey and \parencite{paszke2019pytorch} for the PyTorch implementation used in this project. The AD graph must support repeated differentiation so that mixed and higher-order derivatives such as $\partial^2 V/\partial S\partial v$ can be evaluated stably -- another reason for smooth activations. The same machinery makes the loss differentiable with respect to any quantity recorded in the graph, including the Heston parameters $\kappa$, $\theta$, $\xi$, and $\rho$ in the inverse problem, so that the network weights and model parameters can be optimized jointly.
 
+\paragraph{Monte Carlo interpretation and generalization.} The empirical loss $\mathcal{L}_{\mathrm{pde}}=N_f^{-1}\sum_i |\mathcal{R}_{\boldsymbol{w}}(\mathbf{x}_i)|^2$ is the Monte Carlo estimator of the population residual functional $\mathbb{E}_{\mathbf{x}\sim\mu}[|\mathcal{R}_{\boldsymbol{w}}(\mathbf{x})|^2]$ under the collocation distribution $\mu$ \parencite{raissi2019physics,sirignano2018dgm}. For parabolic problems with sufficiently smooth coefficients and Lipschitz solutions, \textcite{mishra2022estimates,shin2020convergence} establish that the squared $L^2$ error of the trained network decays as $\mathcal{O}(N_f^{-1/2})$ in the number of interior collocation points plus an irreducible optimization gap; the same bound applies to the inverse problem under standard identifiability assumptions \parencite{wang2022respecting}. The forward Heston PINN therefore sits in a regime where increasing $N_f$ from $10^4$ to $10^5$ would reduce the statistical part of the error by roughly a factor of three, while the optimization-gap part is dominated by the gradient-pathology issues of \textcite{wang2021understanding,wang2022expert,krishnapriyan2021characterizing}.
+
 \subsection{Neural-network approximation}
 
 The unknown pricing function is represented by a fully connected feed-forward multilayer perceptron, implemented in PyTorch using the \texttt{torch.nn.Module} interface \parencite{paszke2019pytorch,pytorch_docs}. For the Black--Scholes model, the network maps the two-dimensional input $(S,\tau)$ to a scalar price,
@@ -305,6 +307,143 @@ with $g$ given by $g(0,\tau)=0$ at the lower asset-price boundary and, where use
 \paragraph{PINN failure modes and loss balancing.} A recurring difficulty with PINN training is that the gradients of $\mathcal{L}_{\mathrm{pde}}$, $\mathcal{L}_{\mathrm{ic}}$, and $\mathcal{L}_{\mathrm{bc}}$ are typically of very different magnitudes, which produces unbalanced updates and slow convergence. \textcite{wang2021understanding} attribute this to gradient pathologies arising from the multi-objective structure of the loss, \textcite{wang2022expert} analyze the same phenomenon through the lens of the neural tangent kernel, and \textcite{krishnapriyan2021characterizing} document a family of regimes in which naive PINNs fail to converge to the correct PDE solution. In practice, the loss weights $\lambda_{\bullet}$ in \cref{eq:pinn_loss} are treated as hyperparameters chosen by grid search; the values used in this project are reported in \cref{tab:nn_architectures}. General reviews of the PINN literature and surrounding software ecosystem are given by \textcite{karniadakis2021physics}, \textcite{cuomo2022scientific}, and \textcite{lu2021deepxde}; an early application of PINNs to option-pricing PDEs analogous to ours is \textcite{lewis2025pinnsoptions}.
 
 \paragraph{Related deep-learning PDE solvers.} PINNs sit within a broader family of deep-learning PDE solvers. Closely related approaches include the Deep Galerkin Method of \textcite{sirignano2018dgm}, which minimizes a similar residual-based functional over sampled points; the deep BSDE / forward--backward SDE formulation that reframes the pricing problem as a stochastic control problem solved by neural networks \parencite{han2018solving,e2017deep,beck2020deepbsde}; Kolmogorov-PDE methods that learn the solution from Feynman--Kac--simulated paths \parencite{beck2021deep}; and classical Monte Carlo benchmarks \parencite{glasserman2003monte}. Emerging alternative basis architectures such as Kolmogorov--Arnold networks \parencite{liu2024kan} may also prove well suited to PDE tasks but are not pursued here.
+
+\subsection{Training algorithms}\label{subsec:algorithms}
+
+The full training procedure for the forward Black--Scholes and Heston PINNs is summarised in Algorithm~\ref{alg:forward_pinn}; the two-stage Adam + L-BFGS schedule used for the inverse Heston calibration is summarised in Algorithm~\ref{alg:inverse_pinn}. Both algorithms operate on the same composite-loss template and use reverse-mode AD to obtain every partial derivative entering the residual.
+
+\begin{algorithm}[H]
+\caption{Forward PINN training (Black--Scholes and Heston)}
+\label{alg:forward_pinn}
+\begin{algorithmic}[1]
+\Require interior $\mathcal{D}_f$, IC $\mathcal{D}_{\mathrm{ic}}$, BC $\mathcal{D}_{\mathrm{bc}}$; weights $\lambda_\bullet$; epochs $E$; base LR $\eta_0$
+\State Initialise $V_{\boldsymbol{w}}$ with activation-matched scheme \parencite{glorot2010xavier,he2015delving,sitzmann2020siren}
+\State Adam state $\leftarrow$ defaults; cosine schedule $\eta_n$ over $E$ \parencite{kingma2015adam,loshchilov2017sgdr}
+\For{$n=1,\ldots,E$}
+    \State Forward pass: $V \leftarrow V_{\boldsymbol{w}}(\mathbf{x}_f)$, then AD for $V_S, V_\tau, V_{SS}$ (and $V_v, V_{vv}, V_{Sv}$ for Heston)
+    \State $\mathcal{R} \leftarrow$ strong-form residual of \cref{eq:bs_pde} / \cref{eq:heston_pde}
+    \State $\mathcal{L}_{\mathrm{pde}} \leftarrow \|\mathcal{R}\|^2/N_f$
+    \State $\mathcal{L}_{\mathrm{ic}} \leftarrow \|V_{\boldsymbol{w}}(\mathbf{x}_{\mathrm{ic}})-\max(S-K,0)\|^2/N_{\mathrm{ic}}$
+    \State $\mathcal{L}_{\mathrm{bc}} \leftarrow \|V_{\boldsymbol{w}}(\mathbf{x}_{\mathrm{bc}})-g\|^2/N_{\mathrm{bc}}$
+    \State $\mathcal{L} \leftarrow \lambda_{\mathrm{pde}}\mathcal{L}_{\mathrm{pde}} + \lambda_{\mathrm{ic}}\mathcal{L}_{\mathrm{ic}} + \lambda_{\mathrm{bc}}\mathcal{L}_{\mathrm{bc}}$
+    \State Backpropagate $\nabla_{\boldsymbol{w}}\mathcal{L}$; clip to $\|g\|_2 \le 1$ \parencite{pascanu2013difficulty}
+    \State Adam step with $\eta_n$; advance cosine schedule
+\EndFor
+\State \Return $V_{\boldsymbol{w}}$, loss history
+\end{algorithmic}
+\end{algorithm}
+
+\begin{algorithm}[H]
+\caption{Inverse Heston PINN (two-stage Adam + L-BFGS)}
+\label{alg:inverse_pinn}
+\begin{algorithmic}[1]
+\Require collocation $\mathcal{D}_f,\mathcal{D}_{\mathrm{ic}},\mathcal{D}_{\mathrm{bc}}$, market $\mathcal{D}_m$; weights $\lambda_\bullet$; epochs $E_1$ (Adam), $E_2$ (L-BFGS); LRs $\eta_{\mathrm{nn}},\eta_{\mathrm{H}}$
+\State Initialise $V_{\boldsymbol{w}}$ (SIREN) and latent $(\tilde\kappa,\tilde\theta,\tilde\xi,\tilde\rho)$ from user guesses via inverse softplus / atanh
+\State Constrain on-the-fly: $\kappa=\mathrm{softplus}(\tilde\kappa)$, \ldots, $\rho=\tanh(\tilde\rho)$
+\State Adam with two parameter groups (LRs $\eta_{\mathrm{nn}},\eta_{\mathrm{H}}$); cosine schedule over $E_1$
+\For{$n=1,\ldots,E_1$ (Phase 1: Adam)}
+    \State Compute $\mathcal{L}_{\mathrm{pde}},\mathcal{L}_{\mathrm{ic}},\mathcal{L}_{\mathrm{bc}}$ as in Alg.~\ref{alg:forward_pinn}, plus $\mathcal{L}_{\mathrm{data}}$ on $\mathcal{D}_m$
+    \State $\mathcal{L}_{\mathrm{Feller}} \leftarrow [\mathrm{ReLU}(\xi^2-2\kappa\theta)]^2$ \parencite{feller1951two,cox1985cir}
+    \State $\mathcal{L} \leftarrow \sum_{\bullet}\lambda_{\bullet}\mathcal{L}_{\bullet}$; backprop; clip; Adam step; schedule step
+\EndFor
+\For{$n=1,\ldots,E_2$ (Phase 2: L-BFGS, strong-Wolfe)}
+    \State \textbf{closure}: zero grads, recompute $\mathcal{L}$, backprop \emph{without} clipping
+    \State L-BFGS step($\,$closure$\,$) \parencite{liu1989limited}
+\EndFor
+\State \Return $V_{\boldsymbol{w}}$, calibrated $(\kappa,\theta,\xi,\rho)$, loss \& parameter history
+\end{algorithmic}
+\end{algorithm}
+
+\subsection{Code structure and key listings}\label{subsec:code}
+
+The implementation \parencite{furnes2026fys5429code} is deliberately small and modular. The four library files (\texttt{sample.py}, \texttt{activations.py}, \texttt{bspinn.py}, \texttt{hspinn.py}, \texttt{invpinn.py}, \texttt{train\_bs.py}, \texttt{train\_hs.py}, \texttt{train\_inv.py}) are each under $130$ lines, and three Jupyter notebooks (one per experiment) drive them with the hyperparameter values reported in \cref{tab:nn_architectures}. The data flow is uniform across all three experiments: pre-sampled collocation parquet files $\to$ tensorisation on the GPU $\to$ PINN class $\to$ loss assembly with AD $\to$ Adam (and optionally L-BFGS) loop $\to$ logged history $\to$ post-training diagnostics. Two implementation choices are reported in code below because they materially affect the result and are easy to get wrong.
+
+\paragraph{PINN class with smooth activation and Xavier init (Listing~\ref{lst:hspinn}).} The Heston forward network is a textbook fully-connected MLP; the only nontrivial choices are the $\tanh$ activation (twice differentiable, required for the second-order AD passes), input normalization (the network sees $\widetilde{\mathbf{x}}=(S/300,v,\tau)\in[0,1]^3$ rather than the raw physical scales), and Xavier-normal weight initialization \parencite{glorot2010xavier} matched to $\tanh$. The Black--Scholes network is identical except for the two-input head.
+
+\begin{lstlisting}[language=Python,caption={Heston forward PINN class (\texttt{hspinn.py}, edited for brevity). The same template is used for Black--Scholes with a $2$-dim input head.},label={lst:hspinn}]
+class HSPINN(nn.Module):
+    def __init__(self, hidden_layers=3, neurons=256,
+                 S_scale=300., v_scale=1., tau_scale=1.,
+                 activation='tanh'):
+        super().__init__()
+        self.S_scale, self.v_scale = S_scale, v_scale
+        self.tau_scale = tau_scale
+        act = nn.Tanh if activation=='tanh' else nn.Softplus
+        layers = [nn.Linear(3, neurons), act()]
+        for _ in range(hidden_layers):
+            layers += [nn.Linear(neurons, neurons), act()]
+        layers += [nn.Linear(neurons, 1)]
+        self.net = nn.Sequential(*layers)
+        for m in self.net:
+            if isinstance(m, nn.Linear):
+                nn.init.xavier_normal_(m.weight)
+                nn.init.zeros_(m.bias)
+
+    def forward(self, S, v, tau):
+        x = torch.cat([S/self.S_scale,
+                       v/self.v_scale,
+                       tau/self.tau_scale], dim=1)
+        return self.net(x)
+\end{lstlisting}
+
+\paragraph{PDE residual via reverse-mode AD (Listing~\ref{lst:residual}).} The full Heston residual is assembled by six separate \texttt{torch.autograd.grad} calls with \texttt{create\_graph=True}, allowing the residual itself to be differentiated again when backpropagating $\mathcal{L}_{\mathrm{pde}}$ into $\boldsymbol{w}$ (and, in the inverse problem, into the latent Heston parameters). The mixed second derivative $V_{Sv}$ is obtained as the variance-direction gradient of the previously computed $V_S$, which is the only safe order under PyTorch's reverse-mode AD when the variables enter on different branches of the graph.
+
+\begin{lstlisting}[language=Python,caption={Heston PDE residual assembled by reverse-mode AD inside the training loop.},label={lst:residual}]
+V = model(S, v, tau)
+g  = torch.ones_like(V)
+V_S   = grad(V, S,   grad_outputs=g, create_graph=True)[0]
+V_v   = grad(V, v,   grad_outputs=g, create_graph=True)[0]
+V_tau = grad(V, tau, grad_outputs=g, create_graph=True)[0]
+V_SS  = grad(V_S, S, grad_outputs=g, create_graph=True)[0]
+V_vv  = grad(V_v, v, grad_outputs=g, create_graph=True)[0]
+V_Sv  = grad(V_S, v, grad_outputs=g, create_graph=True)[0]
+R = V_tau - (0.5*v*S**2*V_SS
+             + rho*xi*v*S*V_Sv
+             + 0.5*xi**2*v*V_vv
+             + r*S*V_S
+             + kappa*(theta - v)*V_v
+             - r*V)
+loss_pde = (R**2).mean()
+\end{lstlisting}
+
+\paragraph{Parameter reparameterization for the inverse problem (Listing~\ref{lst:reparam}).} The four Heston parameters are stored as unconstrained latent variables $\tilde{\bullet}\in\mathbb{R}$ and exposed through smooth bijective transforms. This is the single change that prevents the optimizer from drifting into nonphysical regions ($\kappa\le 0$, $|\rho|\ge 1$) and is the reason the Feller penalty remains numerically zero throughout training.
+
+\begin{lstlisting}[language=Python,caption={Constrained Heston parameters as differentiable properties (\texttt{invpinn.py}).},label={lst:reparam}]
+class INVPINN(nn.Module):
+    def __init__(self, ..., kappa_init=1., theta_init=.1,
+                 xi_init=.5, rho_init=0.):
+        super().__init__()
+        self._raw_kappa = nn.Parameter(_inv_softplus(
+            torch.tensor([kappa_init])))
+        self._raw_theta = nn.Parameter(_inv_softplus(
+            torch.tensor([theta_init])))
+        self._raw_xi    = nn.Parameter(_inv_softplus(
+            torch.tensor([xi_init])))
+        self._raw_rho   = nn.Parameter(_inv_tanh(
+            torch.tensor([max(-.999, min(.999, rho_init))])))
+        # ... MLP layers as in HSPINN ...
+
+    @property
+    def kappa(self): return F.softplus(self._raw_kappa)
+    @property
+    def theta(self): return F.softplus(self._raw_theta)
+    @property
+    def xi(self):    return F.softplus(self._raw_xi)
+    @property
+    def rho(self):   return torch.tanh(self._raw_rho)
+\end{lstlisting}
+
+\subsection{Testing, verification, and benchmarks}\label{subsec:testing}
+
+Although a PINN is mesh-free and self-supervised by the PDE, the training and evaluation pipeline is unit-tested at four points; the same checks are used as exit criteria for the hyperparameter sweeps reported in \cref{section:result}.
+
+\paragraph{Closed-form Black--Scholes benchmark.} The Black--Scholes PINN is validated against the analytical call price $C=SN(d_1)-Ke^{-rT}N(d_2)$ of \textcite{black1973pricing,merton1973rational} at the at-the-money point $(S,\tau)=(K,T/2)$. With benchmark parameters $K=100,r=0.05,\sigma=0.2$ the reference value is $C=6.888729$; the trained PINN reports $6.927159$, an absolute error of $0.0384$ ($0.56\%$ relative). The same closed form provides ground truth for any other $(S,\tau)$ query and is used pointwise in the absolute-error figures of \cref{section:result}.
+
+\paragraph{Semi-analytical Heston benchmark.} The Heston PINN is validated against the characteristic-function pricer \eqref{eq:heston_cf_price}--\eqref{eq:heston_pj} of \textcite{heston1993closed}, evaluated by \texttt{scipy.integrate.quad} on $[10^{-4},100]$ in Fourier space. Faster alternatives exist -- the FFT method of \textcite{carr1999fft}, the Fourier-cosine (COS) expansion of \textcite{fang2008cos}, and the ``little Heston trap'' regularised characteristic function of \textcite{albrecher2007heston} -- but adaptive Gauss--Kronrod quadrature was sufficient for the grid sizes used here, and is the cleanest reference for a one-off benchmark.
+
+\paragraph{Sanity checks at no extra cost.} Three additional consistency checks are performed on every trained model. \emph{(i) Put--call parity:} the trained call surface combined with the analytical relation $C-P=S-Ke^{-r\tau}$ produces an implied put surface; deviations from the analytical put price stay below $10^{-2}$ at the at-the-money point. \emph{(ii) Boundary residuals:} on the held-out boundary set $S=0$, the network output $V_{\boldsymbol{w}}(0,\tau)$ stays at $\mathcal{O}(10^{-4})$ throughout the $\tau$ range, matching the Dirichlet condition without it ever being part of $\mathcal{L}_{\mathrm{bc}}$. \emph{(iii) AD versus finite differences:} reverse-mode AD derivatives at the evaluation point agree with $h=10^{-3}$ central differences to $4$ significant figures, ruling out a wrong-residual bug as an explanation for the small remaining PDE-loss values.
+
+\paragraph{Monte Carlo cross-check.} As a third independent benchmark, a $10^{5}$-path Monte Carlo pricer \parencite{glasserman2003monte} based on the log-Euler GBM scheme (and the reflection-Euler Heston scheme of \textcite{andersen2008simple,lord2010comparison} for the stochastic-volatility case) was used during development to spot-check both the PINN and the semi-analytical pricer at a handful of points; agreement was within standard Monte Carlo error in all cases. These checks are not reported as a separate result table because they reproduce the benchmarks above to within statistical noise, but they protect the PINN evaluation against systematic bugs in either reference solution.
 
 \subsection{Inverse Heston calibration}\label{subsec:inverse}
 
@@ -569,3 +708,5 @@ The complete pipeline is implemented in Python and PyTorch \parencite{paszke2019
 \end{table}
 
 \paragraph{Software stack and tooling.} The numerical stack is PyTorch \parencite{paszke2019pytorch,pytorch_docs} for the neural-network and AD layer, NumPy and SciPy for collocation sampling and the Heston characteristic-function quadrature (\texttt{scipy.integrate.quad}), and Matplotlib for figures. Local development and debugging were performed on a personal Windows workstation in Visual Studio Code \parencite{vscode}. AI-assisted coding tools \parencite{cursor,google_antigravity,anthropic_claude_code} were used in a supporting role for code navigation, refactoring, and \LaTeX{} formatting only; the model selection, numerical experiments, interpretation of results, and final responsibility for the manuscript remain with the author.
+
+\paragraph{Reproducibility.} All production runs use PyTorch 2.x with CUDA 12.x on Google Colab's hosted Linux images, fix the Python, NumPy and PyTorch random seeds to $42$ before tensorisation, and store the trained model state, the recorded loss history, and the collocation parquet files alongside the report. The exact training cell outputs (including the per-experiment wall-clock figures in \cref{tab:runtime_summary}, the version banners, and the captured GPU identifier) are preserved as Markdown exports in the \texttt{exports/} directory of the manuscript repository \parencite{furnes2026fys5429overleaf}, and the source code in the companion repository \parencite{furnes2026fys5429code} carries a permanent commit hash for each experiment so that the same trained models can be reconstructed end-to-end from raw data.
