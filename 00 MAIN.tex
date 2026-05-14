@@ -83,6 +83,37 @@
   framexleftmargin=1.2em
 }
 
+\lstdefinestyle{pythonappendix}{
+  style=python,
+  basicstyle=\ttfamily\scriptsize,
+  numberstyle=\tiny\color{black!60},
+  numbersep=5pt,
+  xleftmargin=1.4em,
+  framexleftmargin=0.9em,
+  aboveskip=4pt,
+  belowskip=4pt,
+  captionpos=b,
+  breaklines=true,
+  breakatwhitespace=true,
+  columns=fullflexible,
+  keepspaces=true
+}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%% ALGORITHMS %%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{etoolbox}
+
+% Globally make algorithm bodies smaller
+\AtBeginEnvironment{algorithmic}{\footnotesize}
+
+% Optional: cleaner names
+\algrenewcommand\algorithmicrequire{\textbf{Input:}}
+\algrenewcommand\algorithmicensure{\textbf{Output:}}
+
 \lstset{style=python}
 \renewcommand{\lstlistingname}{Listing}
 
@@ -110,6 +141,21 @@
 \titlespacing*{\subsubsection}{0pt}{6pt}{2pt}
 
 \captionsetup{figurename=Figure}
+
+% Appendix figure compression
+\captionsetup[subfigure]{
+  font=scriptsize,
+  labelfont=bf,
+  skip=2pt
+}
+
+\newcommand{\appfig}[3]{%
+  \begin{subfigure}[t]{#1}
+    \centering
+    \includegraphics[width=\linewidth]{#2}
+    \caption{#3}
+  \end{subfigure}%
+}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%% REFERENCES %%%%%%%%%%%%%%%

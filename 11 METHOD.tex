@@ -83,7 +83,11 @@ with
 \end{align}
 where $\mathcal{R}_{\boldsymbol{w}}$ is obtained by substituting $V_{\boldsymbol{w}}$ and its reverse-mode AD derivatives \parencite{baydin2018automatic} into \eqref{eq:bs_pde} or \eqref{eq:heston_pde}, and $g$ encodes the asset-price boundaries. Listing~\ref{lst:residual} shows how the Heston residual is assembled with six \texttt{torch.autograd.grad} calls; \texttt{create\_graph=True} is essential so that the residual itself remains differentiable when backpropagating $\mathcal{L}_{\mathrm{pde}}$ into $\boldsymbol{w}$ and, in the inverse problem, into the latent Heston parameters. The mixed second derivative $V_{Sv}$ is obtained as the variance-direction gradient of $V_S$, the only graph-safe order under reverse-mode AD when $S$ and $v$ enter on different branches.
 
-\begin{lstlisting}[language=Python,caption={Heston PDE residual assembled by reverse-mode AD.},label={lst:residual}]
+\begin{lstlisting}[
+style=pythonappendix,
+caption={Heston PDE residual assembled by reverse-mode AD.},
+label={lst:residual}
+]
 V = model(S, v, tau)
 g  = torch.ones_like(V)
 V_S   = grad(V, S,   grad_outputs=g, create_graph=True)[0]
@@ -121,7 +125,11 @@ Adam updates the trainable parameters without constraint, which would routinely 
 \end{equation}
 so that the PDE residual, Feller penalty, and data loss are always evaluated at physically admissible values. Gradients flow through the transforms by chain rule. This single design choice keeps the Feller penalty at machine zero throughout training and is implemented in Listing~\ref{lst:reparam}.
 
-\begin{lstlisting}[language=Python,caption={Constrained Heston parameters as differentiable properties (\texttt{invpinn.py}).},label={lst:reparam}]
+\begin{lstlisting}[
+style=pythonappendix,
+caption={Constrained Heston parameters as differentiable properties (\texttt{invpinn.py}).},
+label={lst:reparam}
+]
 class INVPINN(nn.Module):
     def __init__(self, ..., kappa_init=1., theta_init=.1,
                  xi_init=.5, rho_init=0.):

@@ -166,212 +166,235 @@
 
 \subsection{Black--Scholes PINN}
 
-The Black--Scholes hyperparameter study consists of four sweeps run for $10{,}000$ epochs each on the standard collocation grid (interior, IC, BC). The sweeps varied (i)~depth\,$\times$\,width\,$\times$\,activation (18 combinations over $\{2,3,4\}$ layers, $\{64,128,256\}$ neurons, and \texttt{softplus}/\texttt{tanh}), (ii)~the Adam learning rate, (iii)~the loss-weight triple $(\lambda_{\text{PDE}},\lambda_{\text{IC}},\lambda_{\text{BC}})$, and (iv)~the epoch budget. 
+The Black--Scholes hyperparameter study consists of four $10{,}000$-epoch sweeps on the standard collocation grid: architecture, Adam learning rate, loss weights, and epoch budget. The ranked summaries and training curves tell the same story. \texttt{tanh} dominates \texttt{softplus}; at least 128 neurons are needed for sub-$10^{-2}$ residuals; $\eta_0=5\times10^{-4}$ sits in the stable region before large learning rates begin to oscillate; PDE-heavy loss weights perform best; and the residual is still decaying at $10{,}000$ epochs, motivating the final $50{,}000$-epoch run.
 
 \begin{figure}[H]
     \centering
+    \captionsetup{font=scriptsize}
+    \captionsetup[subfigure]{font=tiny,skip=1pt}
+    \setlength{\abovecaptionskip}{2pt}
+    \setlength{\belowcaptionskip}{0pt}
 
-    \begin{subfigure}[t]{0.5\linewidth}
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    % RANKED SWEEPS
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+    \begin{subfigure}[t]{0.49\linewidth}
         \centering
         \includegraphics[width=\linewidth]{figures/hyper_bs_arch_ranked.pdf}
-        \caption{Architecture ranking. Final PDE loss across the 18 (depth, width, activation) combinations; \texttt{tanh} consistently outperforms \texttt{softplus} at matched depth/width and at least 128 neurons are needed for sub-$10^{-2}$ PDE residual.}
+        \caption{Architecture ranking: \texttt{tanh}, wide/shallow wins.}
+        \label{fig:hyper_bs_arch_ranked}
     \end{subfigure}
-
-    \vspace{0.35em}
-
-    \begin{subfigure}[t]{0.5\linewidth}
+    \hfill
+    \begin{subfigure}[t]{0.49\linewidth}
         \centering
         \includegraphics[width=\linewidth]{figures/hyper_bs_lr_ranked.pdf}
-        \caption{Learning-rate ranking. Adam with $\eta_0\in[5\times 10^{-4},2\times 10^{-3}]$ sits in the flat region of the loss--$\eta_0$ curve; larger learning rates destabilize the residual under gradient clipping.}
+        \caption{Learning-rate ranking: stable region near $5\times10^{-4}$.}
+        \label{fig:hyper_bs_lr_ranked}
     \end{subfigure}
 
-    \vspace{0.35em}
+    \vspace{0.25cm}
 
-    \begin{subfigure}[t]{0.5\linewidth}
+    \begin{subfigure}[t]{0.49\linewidth}
         \centering
         \includegraphics[width=\linewidth]{figures/hyper_bs_ranked.pdf}
-        \caption{Loss-weight ranking. Configurations with $\lambda_{\text{PDE}}\ge \lambda_{\text{IC}}\ge\lambda_{\text{BC}}$ dominate; placing too much weight on the BC term starves the PDE loss and degrades the interior fit.}
+        \caption{Loss-weight ranking: PDE-heavy objectives dominate.}
+        \label{fig:hyper_bs_ranked}
     \end{subfigure}
-
-    \vspace{0.35em}
-
-    \begin{subfigure}[t]{0.5\linewidth}
+    \hfill
+    \begin{subfigure}[t]{0.49\linewidth}
         \centering
         \includegraphics[width=\linewidth]{figures/hyper_bs_conv_ranked.pdf}
-        \caption{Epoch-budget ranking. The PDE loss is still decaying at the 10{,}000-epoch budget used in the sweep, which motivates the 50{,}000-epoch final run.}
+        \caption{Epoch ranking: decay continues beyond $10{,}000$ epochs.}
+        \label{fig:hyper_bs_conv_ranked}
     \end{subfigure}
 
-    \caption{Ranked Black--Scholes hyperparameter sweeps. The panels summarize the architecture, learning-rate, loss-weight, and epoch-budget experiments used to select the final Black--Scholes PINN configuration.}
+    \caption{Ranked Black--Scholes hyperparameter sweeps. The four panels summarize the architecture, learning-rate, loss-weight, and epoch-budget experiments used to select the final Black--Scholes PINN configuration.}
     \label{fig:hyper_bs_ranked_all_appendix}
-\end{figure}
 
+    \vspace{0.35cm}
 
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-\newpage\subsubsection{Training curves}
-
-The training curves below resolve the convergence dynamics behind the ranked summaries above. The top-3 architecture and $\lambda$ curves show whether the leading configurations differ mainly in final loss or in early-epoch transient behaviour; the learning-rate and epoch-budget curves expose the oscillation regime at large $\eta_0$ and the unfinished decay at the 10{,}000-epoch budget that motivates the longer final run.
-
-\begin{figure}[H]
-    \centering
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    % TRAINING CURVES
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
     \begin{subfigure}[t]{0.49\linewidth}
         \centering
         \includegraphics[width=\linewidth]{figures/hyper_bs_arch_top3_curves.pdf}
-        \caption{Training curves for the three best-performing Black--Scholes architectures. All three are \texttt{tanh}-activated networks with $\ge 128$ neurons; they differ in early-epoch transient stability rather than in final accuracy, with the leading 2$\times$256 model already within a factor of two of its final PDE loss by epoch $5000$.}
-        \label{fig:hyper_bs_arch_top3_curves.pdf}
+        \caption{Top architectures: mainly differ in early stability.}
+        \label{fig:hyper_bs_arch_top3_curves}
     \end{subfigure}
     \hfill
     \begin{subfigure}[t]{0.49\linewidth}
         \centering
         \includegraphics[width=\linewidth]{figures/hyper_bs_lr_curves.pdf}
-        \caption{Training curves for the tested Black--Scholes learning rates. Curves at $\eta_0\ge 3\times 10^{-3}$ exhibit persistent oscillations even with gradient clipping \parencite{pascanu2013difficulty}, while $\eta_0\in[3\times 10^{-4},10^{-3}]$ produces monotonic decay; $\eta_0=5\times 10^{-4}$ was selected for the final run.}
-        \label{fig:hyper_bs_lr_curves.pdf}
+        \caption{Learning-rate curves: large $\eta_0$ oscillates.}
+        \label{fig:hyper_bs_lr_curves}
     \end{subfigure}
 
-    \vspace{0.5cm}
+    \vspace{0.25cm}
 
     \begin{subfigure}[t]{0.49\linewidth}
         \centering
         \includegraphics[width=\linewidth]{figures/hyper_bs_top3_curves.pdf}
-        \caption{Training curves for the three best-performing Black--Scholes $\lambda$ configurations. All winners satisfy $\lambda_{\text{PDE}}\ge\lambda_{\text{IC}}\ge\lambda_{\text{BC}}$, confirming that the PDE loss must dominate the gradient signal once the payoff has been roughly fitted.}
-        \label{fig:hyper_bs_top3_curves.pdf}
+        \caption{Top $\lambda$ curves: PDE weighting controls fit.}
+        \label{fig:hyper_bs_top3_curves}
     \end{subfigure}
     \hfill
     \begin{subfigure}[t]{0.49\linewidth}
         \centering
         \includegraphics[width=\linewidth]{figures/hyper_bs_conv_curves.pdf}
-        \caption{Training curves for the Black--Scholes convergence experiments. At the 10{,}000-epoch sweep budget the PDE loss is still decreasing roughly log-linearly with epoch, justifying the 50{,}000-epoch budget of the final run.}
-        \label{fig:hyper_bs_conv_curves.pdf}
+        \caption{Convergence curves: $50{,}000$ epochs justified.}
+        \label{fig:hyper_bs_conv_curves}
     \end{subfigure}
 
-    \caption{Training-curve comparison for the main Black--Scholes hyperparameter experiments. The four panels summarize the effects of architecture choice, learning rate, loss-weight selection, and training duration on convergence behavior.}
+    \caption{Training-curve comparison for the main Black--Scholes hyperparameter experiments. The four panels show the effects of architecture choice, learning rate, loss-weight selection, and training duration on convergence behavior.}
     \label{fig:hyper_bs_curves_panel}
 \end{figure}
 
 \newpage
 
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \subsubsection{Per-component loss decomposition}
 
-The four panels show the per-component loss decomposition of the final 50{,}000-epoch Black--Scholes PINN. The numerical values reported in the captions are read directly from Table~\ref{tab:bs_training_loss_history}.
+The loss decompositions compare the final $50{,}000$-epoch forward PINN runs. Black--Scholes converges smoothly: the total loss falls from $\approx 2.2\times10^4$ to $0.103$, the PDE residual settles near $2\times10^{-3}$, the IC loss dominates because of the kinked payoff, and the BC loss becomes negligible early. Heston is noisier: the larger $(S,v,\tau)$ state space, upper-$S$ boundary, and mixed derivative $\partial^2V/\partial S\partial v$ produce transient spikes before convergence to total loss $\approx0.92$.
 
 \begin{figure}[H]
     \centering
+    \captionsetup{font=scriptsize}
+    \captionsetup[subfigure]{font=tiny,skip=1pt}
+    \setlength{\abovecaptionskip}{2pt}
+    \setlength{\belowcaptionskip}{0pt}
+
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    % BLACK--SCHOLES
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
     \begin{subfigure}[t]{0.49\linewidth}
         \centering
         \includegraphics[width=\linewidth]{figures/pinn_bs_loss_total.pdf}
-        \caption{Total training loss for the final Black--Scholes PINN. The weighted loss drops from $\approx 2.2\times 10^4$ at initialization (dominated by the unfitted payoff) to $0.103$ at epoch $50{,}000$, a reduction of more than five orders of magnitude.}
+        \caption{BS total: $2.2\times10^4\to0.103$.}
         \label{fig:pinn_bs_loss_total.pdf}
     \end{subfigure}
     \hfill
     \begin{subfigure}[t]{0.49\linewidth}
         \centering
         \includegraphics[width=\linewidth]{figures/pinn_bs_loss_pde.pdf}
-        \caption{PDE residual loss decays from $\approx 4\times 10^{-2}$ at initialization to $\approx 2\times 10^{-3}$ by epoch $50{,}000$, consistent with the gradient-clipped Adam plus cosine-annealing schedule described in the Methods section.}
+        \caption{BS PDE: $\approx4\times10^{-2}\to2\times10^{-3}$.}
         \label{fig:pinn_bs_loss_pde.pdf}
     \end{subfigure}
 
-    \vspace{0.6cm}
+    \vspace{0.25cm}
 
     \begin{subfigure}[t]{0.49\linewidth}
         \centering
         \includegraphics[width=\linewidth]{figures/pinn_bs_loss_ic.pdf}
-        \caption{Initial-condition loss for the final Black--Scholes PINN. The kinked $\max(S-K,0)$ payoff is the hardest constraint: this term dominates the total loss throughout training, decaying from $\approx 4.4\times 10^{3}$ to $\approx 1.7\times 10^{-2}$ by epoch $50{,}000$.}
+        \caption{BS IC: payoff kink dominates.}
         \label{fig:pinn_bs_loss_ic.pdf}
     \end{subfigure}
     \hfill
     \begin{subfigure}[t]{0.49\linewidth}
         \centering
         \includegraphics[width=\linewidth]{figures/pinn_bs_loss_bc.pdf}
-        \caption{Boundary-condition loss for the final Black--Scholes PINN. The $V(0,\tau)=0$ Dirichlet condition is easy to satisfy and the BC loss falls below $3\times 10^{-4}$ already by epoch $5000$, contributing negligibly to the total loss thereafter.}
+        \caption{BS BC: negligible after early epochs.}
         \label{fig:pinn_bs_loss_bc.pdf}
     \end{subfigure}
 
-    \caption{Loss decomposition for the final Black--Scholes PINN. The four panels show the evolution of the total, PDE, initial-condition, and boundary-condition losses, providing a compact overview of convergence throughout training.}
+    \caption{Loss decomposition for the final Black--Scholes PINN. The four panels show total, PDE, initial-condition, and boundary-condition losses.}
     \label{fig:pinn_bs_loss_panel}
-\end{figure}
 
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    \vspace{0.35cm}
 
-\clearpage\subsection{Heston PINN}
-
-The Heston PINN was selected from analogous sweeps over depth/width/activation, learning rate, $\lambda$ triples, and epoch budget on the three-dimensional $(S,v,\tau)$ collocation grid. The best configuration uses three hidden layers of 256 \texttt{tanh} neurons with $(\lambda_{\text{PDE}},\lambda_{\text{IC}},\lambda_{\text{BC}})=(10,10,5)$ and $\eta_0=5\times 10^{-3}$ under the same cosine-annealing schedule \parencite{loshchilov2017sgdr}. The per-component loss curves below show the corresponding 50{,}000-epoch run, with the larger Heston state space producing markedly noisier early-training transients than the Black--Scholes case.
-
-\begin{figure}[H]
-    \centering
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    % HESTON
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
     \begin{subfigure}[t]{0.49\linewidth}
         \centering
         \includegraphics[width=\linewidth]{figures/pinn_hs_loss_total.pdf}
-        \caption{Total training loss for the Heston PINN. The weighted total falls from $\approx 2.5\times 10^{5}$ at initialization (dominated by the upper-$S$ Dirichlet BC) to $\approx 0.92$ at epoch $50{,}000$, with intermittent excursions around epochs $15{,}000$--$22{,}500$ where a transient instability inflates the PDE and BC components by an order of magnitude before the cosine-annealed learning rate damps them.}
+        \caption{Heston total: $2.5\times10^5\to0.92$.}
         \label{fig:pinn_hs_loss_total.pdf}
     \end{subfigure}
     \hfill
     \begin{subfigure}[t]{0.49\linewidth}
         \centering
         \includegraphics[width=\linewidth]{figures/pinn_hs_loss_pde.pdf}
-        \caption{PDE residual loss for the Heston PINN. Starting from $\approx 3.4\times 10^{-2}$ at initialization (small because the untrained network outputs near-zero values that trivially satisfy the homogeneous PDE), the residual peaks above $100$ during the early payoff-fitting phase and decays to $\approx 3.4\times 10^{-2}$ by epoch $50{,}000$. The mixed second derivative $\partial^2 V/\partial S\partial v$ in the Heston PDE makes this loss noisier than its Black--Scholes counterpart.}
+        \caption{Heston PDE: noisy mixed-derivative residual.}
         \label{fig:pinn_hs_loss_pde.pdf}
     \end{subfigure}
 
-    \vspace{0.6cm}
+    \vspace{0.25cm}
 
     \begin{subfigure}[t]{0.49\linewidth}
         \centering
         \includegraphics[width=\linewidth]{figures/pinn_hs_loss_ic.pdf}
-        \caption{Initial-condition loss for the Heston PINN. The $\max(S-K,0)$ payoff is enforced at $\tau=0$ across the full $(S,v)$ plane; the IC loss decays from $\approx 4.7\times 10^{3}$ to $\approx 7\times 10^{-2}$ over 50{,}000 epochs.}
+        \caption{Heston IC: payoff over $(S,v)$.}
         \label{fig:pinn_hs_loss_ic.pdf}
     \end{subfigure}
     \hfill
     \begin{subfigure}[t]{0.49\linewidth}
         \centering
         \includegraphics[width=\linewidth]{figures/pinn_hs_loss_bc.pdf}
-        \caption{Boundary-condition loss for the Heston PINN, combining the lower-$S$ Dirichlet condition $V(0,v,\tau)=0$ and the upper-$S$ growth condition $V(S_{\max},v,\tau)\approx S_{\max}-Ke^{-r\tau}$. Initialization is dominated by the upper-$S$ term ($\approx 4.1\times 10^{4}$); the loss decays to $\approx 1.6\times 10^{-3}$ by the end of training.}
+        \caption{Heston BC: upper-$S$ term dominates initially.}
         \label{fig:pinn_hs_loss_bc.pdf}
     \end{subfigure}
 
-    \caption{Loss decomposition for the final Heston PINN. The four panels show the evolution of the total, PDE, initial-condition, and boundary-condition losses, providing a compact overview of convergence behavior across the full training run.}
+    \caption{Loss decomposition for the final Heston PINN. The four panels show total, PDE, initial-condition, and boundary-condition losses.}
     \label{fig:pinn_hs_loss_panel}
 \end{figure}
 
+\newpage
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
+\subsection{Inverse PINN}
 
-\clearpage\subsection{Inverse PINN}
-
-The inverse PINN was trained on a synthetic Heston dataset of 200 noisy price observations spread across the $(S,v,\tau)$ domain, with the four Heston parameters reparameterized via softplus/\texttt{tanh} (Listing~\ref{lst:reparam}). Optimization used Adam for 25{,}000 epochs followed by 5{,}000 L-BFGS \parencite{liu1989limited} refinement steps, with $(\lambda_{\text{PDE}},\lambda_{\text{IC}},\lambda_{\text{BC}},\lambda_{\text{data}},\lambda_{\text{Feller}})=(20,10,5,1000,0.1)$, NN learning rate $\eta_0=2\times 10^{-3}$, and a separate Heston-parameter learning rate $\eta_{\text{Heston}}=10^{-3}$. The two figures below trace the loss decomposition and the parameter trajectories; the final calibrated values $(\kappa,\theta,\xi,\rho)=(1.588,0.0266,0.104,0.994)$ should be compared with the data-generating truth $(2.0,0.04,0.3,-0.7)$ from Table~\ref{tab:inverse_pinn_calibration_history}.
-
+The inverse PINN was trained on a synthetic Heston dataset of $200$ noisy price observations spread across the $(S,v,\tau)$ domain, with the four Heston parameters reparameterized via softplus/\texttt{tanh} (Listing~\ref{lst:reparam}). Optimization used Adam for $25{,}000$ epochs followed by $5{,}000$ L-BFGS refinement steps \parencite{liu1989limited}, with $(\lambda_{\text{PDE}},\lambda_{\text{IC}},\lambda_{\text{BC}},\lambda_{\text{data}},\lambda_{\text{Feller}})=(20,10,5,1000,0.1)$, NN learning rate $\eta_0=2\times10^{-3}$, and Heston-parameter learning rate $\eta_{\text{Heston}}=10^{-3}$. The loss panel shows successful optimization of the pricing objective: the data loss drops below $10^{-2}$ by epoch $\sim20{,}000$ and the Feller penalty remains at machine zero throughout. The parameter panel shows the opposite conclusion structurally: the final calibrated values $(\kappa,\theta,\xi,\rho)=(1.588,0.0266,0.104,0.994)$ differ sharply from the data-generating truth $(2.0,0.04,0.3,-0.7)$ in Table~\ref{tab:inverse_pinn_calibration_history}, with $\rho$ converging to the wrong sign.
 \begin{figure}[H]
     \centering
-    \includegraphics[width=\textwidth]{figures/pinn_inv_losses.pdf}
-    \caption{Loss decomposition for the inverse PINN calibration. All six terms (total, PDE, IC, BC, data, Feller) decay over the first $\sim 20{,}000$ epochs; the data loss drops below $10^{-2}$ by epoch $20{,}000$ and the Feller penalty stays at machine zero throughout, confirming that the constrained reparameterization keeps the trajectory inside the Feller-admissible region \parencite{feller1951two}.}
-    \label{fig:pinn_inv_losses}
+    \captionsetup{font=scriptsize}
+    \captionsetup[subfigure]{font=tiny,skip=1pt}
+    \setlength{\abovecaptionskip}{2pt}
+    \setlength{\belowcaptionskip}{0pt}
+
+    \begin{subfigure}[t]{0.75\linewidth}
+        \centering
+        \includegraphics[width=\linewidth]{figures/pinn_inv_losses.pdf}
+        \caption{Inverse losses: the data loss falls below $10^{-2}$ and the Feller penalty stays at zero.}
+        \label{fig:pinn_inv_losses}
+    \end{subfigure}
+
+    \vspace{0.35cm}
+
+    \begin{subfigure}[t]{0.75\linewidth}
+        \centering
+        \includegraphics[width=\linewidth]{figures/pinn_inv_params.pdf}
+        \caption{Parameter paths: $\xi$ collapses toward $\approx 0.1$ and $\rho$ converges to $+0.994$ instead of the true $-0.7$.}
+        \label{fig:pinn_inv_params}
+    \end{subfigure}
+
+    \caption{Inverse PINN calibration diagnostics. The top panel shows the per-component loss decomposition over Adam and L-BFGS training; the bottom panel shows the corresponding Heston-parameter trajectories. Together, the panels show the key inverse-calibration result: the PINN fits prices well while failing to recover the true structural parameters.}
+    \label{fig:inverse_pinn_losses_params_panel}
 \end{figure}
-
-\begin{figure}[H]
-    \centering
-    \includegraphics[width=\textwidth]{figures/pinn_inv_params.pdf}
-    \caption{Estimated Heston parameters during inverse PINN calibration. $\kappa$ and $\theta$ settle close to (but biased from) their true values within 5000 epochs; $\xi$ collapses rapidly toward $\approx 0.1$ rather than the true $0.3$; and $\rho$ moves monotonically from its initial $0$ to $+0.994$, in the opposite sign to the true $-0.7$. After epoch $\sim 25{,}500$ all four trajectories are stationary, matching the plateau region in Table~\ref{tab:inverse_pinn_calibration_history}.}
-    \label{fig:pinn_inv_params}
-\end{figure}
-
-
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\newpage
+\subsubsection{Final calibration report}
+
+The final calibration report collects the main diagnostics of the inverse Heston experiment in a single figure. Taken at face value, the pricing fit looks highly successful: predicted prices track the synthetic market prices closely, the error distribution is tightly centered around zero, and the maturity-slice comparison at $\tau\approx0.5$ shows that the learned pricing function reproduces the observed option-price curve well across asset prices. In other words, as a differentiable pricing surrogate, the inverse PINN performs very well.
+
+The structural conclusion is different. The parameter comparison shows that accurate price fitting does not imply correct recovery of the data-generating Heston parameters. The final estimates $(\kappa,\theta,\xi,\rho)=(1.588,0.0266,0.104,0.994)$ remain biased relative to the true values $(2.0,0.04,0.3,-0.7)$, most notably because $\rho$ is recovered with the wrong sign. This is the clearest illustration of the identifiability problem in the report: in the Heston PDE, $\rho$ enters only through the mixed term $\rho\xi v S\,\partial^2V/\partial S\partial v$, so it is identified mainly through leverage-skew information in the option surface. With only $200$ noisy observations spread across a broad variance domain, that skew signal is too weak to force the optimizer onto the true negative-correlation branch.
 
 \begin{figure}[H]
     \centering
     \includegraphics[width=\linewidth]{figures/pinn_inv_final_calibration_report.pdf}
-    \caption{Final inverse Heston PINN calibration diagnostics. The parity plot shows that predicted prices closely match the synthetic market prices, while the error distribution is tightly concentrated around zero. The maturity-slice comparison at $\tau\approx 0.5$ confirms that the learned pricing function fits the observed option-price curve well across asset prices. However, the parameter comparison panel shows that accurate price fitting does not imply correct structural recovery: $\kappa$, $\theta$ and $\xi$ are biased, and $\rho$ is recovered with the wrong sign. The reason is that $\rho$ enters the Heston PDE only through the mixed term $\rho\xi v S\,\partial^2 V/\partial S\partial v$, so it is identifiable only via the leverage skew in the price surface; with $200$ noisy points spread across a wide variance domain this skew signal is too weak to break the symmetry, and the optimizer converges to a $\rho>0$ branch that fits the prices almost as well as the true negative correlation.}
+    \caption{Final inverse Heston PINN calibration diagnostics. The figure shows strong price fit but weak structural recovery: predicted prices match the synthetic market prices closely, while the recovered Heston parameters remain biased and $\rho$ converges to the wrong sign.}
     \label{fig:pinn_inv_final_calibration_report}
 \end{figure}
 
