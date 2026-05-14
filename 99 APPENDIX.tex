@@ -1,10 +1,88 @@
 \section{Appendix}\label{section:appendix}
 
+\noindent This appendix collects supplementary material referenced from the main text. It contains short code listings for the most load-bearing pieces of the implementation, full training-loss histories for the three PINNs, ranked and curve-resolved hyperparameter sweep diagnostics, per-component loss decompositions for the final 50{,}000-epoch runs, and the inverse-calibration parity and parameter-trajectory diagnostics. The figures are intentionally redundant with the summaries in the main text, but allow a reader to verify the qualitative claims (cosine-annealed decay of the PDE residual, plateauing of the inverse-problem parameters, ill-identifiability of $\rho$) directly from the raw training output.
+
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-\subsection{Pathways}
+\subsection{Code excerpts}
+
+The three listings below show the architectural building blocks of the implementation. Listing~\ref{lst:bspinn} defines the fully connected forward network used for the Black--Scholes PINN, illustrating the input scaling, Xavier initialization \parencite{glorot2010xavier}, and the choice between softplus and \texttt{tanh} activations. Listing~\ref{lst:hs_residual} shows the automatic-differentiation pass that computes the Heston PDE residual; the first- and second-order derivatives are obtained directly from \texttt{torch.autograd.grad} \parencite{baydin2018automatic} and combined into the residual that is squared and averaged to form the PDE loss. Listing~\ref{lst:invpinn_reparam} shows how the four Heston parameters are reparameterized: softplus enforces positivity of $\kappa$, $\theta$ and $\xi$ and \texttt{tanh} maps the raw correlation parameter into $(-1,1)$, so that the Adam optimizer \parencite{kingma2015adam} always operates on unconstrained variables while the PDE residual sees physically valid Heston parameters.
+
+\begin{lstlisting}[style=python,caption={\texttt{BSPINN} forward network. Inputs $(S,\tau)$ are normalized by \texttt{S\_scale} and \texttt{tau\_scale}, followed by a fully connected stack with configurable depth, width, and activation. Weights are initialized with Xavier-normal and biases with zeros, which empirically improves early convergence for both \texttt{softplus} and \texttt{tanh} activations.},label={lst:bspinn}]
+class BSPINN(nn.Module):
+    def __init__(self, hidden_layers=3, neurons_per_layer=128,
+                 S_scale=300.0, tau_scale=1.0, activation='softplus'):
+        super().__init__()
+        self.S_scale = S_scale
+        self.tau_scale = tau_scale
+        layers = [nn.Linear(2, neurons_per_layer),
+                  nn.Softplus() if activation == 'softplus' else nn.Tanh()]
+        for _ in range(hidden_layers):
+            layers.append(nn.Linear(neurons_per_layer, neurons_per_layer))
+            layers.append(nn.Softplus() if activation == 'softplus' else nn.Tanh())
+        layers.append(nn.Linear(neurons_per_layer, 1))
+        self.net = nn.Sequential(*layers)
+        self._init_weights()
+
+    def _init_weights(self):
+        for m in self.net:
+            if isinstance(m, nn.Linear):
+                nn.init.xavier_normal_(m.weight)
+                nn.init.zeros_(m.bias)
+
+    def forward(self, S, tau):
+        S_norm = S / self.S_scale
+        tau_norm = tau / self.tau_scale
+        x = torch.cat([S_norm, tau_norm], dim=1)
+        return self.net(x)
+\end{lstlisting}
+
+\begin{lstlisting}[style=python,caption={Heston PDE residual via automatic differentiation. The forward pass produces $V$, and three first-order and three second-order partial derivatives are obtained by repeated calls to \texttt{torch.autograd.grad} with \texttt{create\_graph=True}. The residual is the difference between $V_\tau$ and the right-hand side of the Heston PDE; squaring and averaging gives the PDE loss component.},label={lst:hs_residual}]
+V_pred = model(S_in, v_in, tau_in)
+V_S   = torch.autograd.grad(V_pred, S_in,  grad_outputs=grad_ones, create_graph=True)[0]
+V_v   = torch.autograd.grad(V_pred, v_in,  grad_outputs=grad_ones, create_graph=True)[0]
+V_tau = torch.autograd.grad(V_pred, tau_in, grad_outputs=grad_ones, create_graph=True)[0]
+V_SS  = torch.autograd.grad(V_S, S_in, grad_outputs=grad_ones, create_graph=True)[0]
+V_vv  = torch.autograd.grad(V_v, v_in, grad_outputs=grad_ones, create_graph=True)[0]
+V_Sv  = torch.autograd.grad(V_S, v_in, grad_outputs=grad_ones, create_graph=True)[0]
+pde_residual = V_tau - (
+    0.5 * v_in * S_in**2 * V_SS
+    + rho * xi * v_in * S_in * V_Sv
+    + 0.5 * xi**2 * v_in * V_vv
+    + r * S_in * V_S
+    + kappa * (theta - v_in) * V_v
+    - r * V_pred)
+loss_pde = torch.mean(pde_residual**2)
+\end{lstlisting}
+
+\begin{lstlisting}[style=python,caption={Heston parameter reparameterization in \texttt{INVPINN.\_\_init\_\_}. The four Heston parameters are stored as unconstrained \texttt{nn.Parameter} tensors and exposed through properties: softplus enforces $\kappa,\theta,\xi>0$ and \texttt{tanh} enforces $\rho\in(-1,1)$. The initial raw values are computed by applying the corresponding inverse functions (\texttt{\_inv\_softplus}, \texttt{\_inv\_tanh}) to the user-supplied physical initial guesses, so the optimization starts exactly at the requested point in the constrained space.},label={lst:invpinn_reparam}]
+# Store *raw* (unconstrained) values; properties apply softplus / tanh
+# so the physics always receives valid Heston parameters.
+self._raw_kappa = nn.Parameter(_inv_softplus(torch.tensor([float(kappa_init)])))
+self._raw_theta = nn.Parameter(_inv_softplus(torch.tensor([float(theta_init)])))
+self._raw_xi    = nn.Parameter(_inv_softplus(torch.tensor([float(xi_init)])))
+rho_clamped     = max(-0.999, min(0.999, float(rho_init)))
+self._raw_rho   = nn.Parameter(_inv_tanh(torch.tensor([rho_clamped])))
+
+@property
+def kappa(self): return F.softplus(self._raw_kappa)
+@property
+def theta(self): return F.softplus(self._raw_theta)
+@property
+def xi(self):    return F.softplus(self._raw_xi)
+@property
+def rho(self):   return torch.tanh(self._raw_rho)
+\end{lstlisting}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\clearpage\subsection{Pathways}
+
+The three panels in Figure~\ref{fig:heston_process_panel} provide visual intuition for the stochastic processes that drive the option-pricing PDEs. Standard Monte Carlo background for these simulations is given in \parencite{glasserman2003monte}; the Heston asset path is generated with a log-Euler scheme and the variance path with the reflection-Euler scheme of \parencite{andersen2008simple} for the CIR process \parencite{cox1985cir} that defines the Heston variance dynamics.
 
 \begin{figure}[H]
     \centering
@@ -12,7 +90,7 @@
     \begin{subfigure}[t]{0.92\linewidth}
         \centering
         \includegraphics[width=\linewidth]{figures/brownian_path.pdf}
-        \caption{Sample Brownian paths used to illustrate the stochastic driving noise in the model setup. The figure provides intuition for the random fluctuations underlying the subsequent Heston dynamics.}
+        \caption{$100$ sample paths of geometric Brownian motion with $S_0=100$, $\mu=0.05$, $\sigma=0.20$, $T=1$ year, and $n=1000$ time steps, simulated via the exact log-Euler scheme $S_{t+\Delta t}=S_t\exp\!\big[(\mu-\tfrac{1}{2}\sigma^2)\Delta t+\sigma\sqrt{\Delta t}\,Z\big]$ with $Z\sim\mathcal{N}(0,1)$. The right panel shows the empirical terminal distribution of $S_T$, which by construction is lognormal; this fixes the constant-volatility benchmark against which the Heston paths in the next two panels deviate \parencite{glasserman2003monte}.}
         \label{fig:brownian_path.pdf}
     \end{subfigure}
 
@@ -21,7 +99,7 @@
     \begin{subfigure}[t]{0.92\linewidth}
         \centering
         \includegraphics[width=\linewidth]{figures/heston.pdf}
-        \caption{Simulated Heston price paths. The figure shows how stochastic volatility generates more realistic and irregular asset-price dynamics than constant-volatility models.}
+        \caption{$100$ Heston asset paths with $S_0=100$, $v_0=0.04$, $\kappa=2.0$, $\theta=0.04$, $\xi=0.3$, $\rho=-0.7$, $r=0.05$, and $T=1$ year discretized into $100{,}000$ steps. The log-Euler update for $S$ is driven by a Brownian increment $Z_1$, correlated with the variance-driving increment $Z_2=\rho Z_1+\sqrt{1-\rho^2}Z_2^\perp$ as in \parencite{andersen2008simple}. The negative leverage correlation $\rho=-0.7$ produces a left-skewed terminal price distribution (right panel) and heavier left tails than the lognormal benchmark above.}
         \label{fig:heston.pdf}
     \end{subfigure}
 
@@ -30,11 +108,11 @@
     \begin{subfigure}[t]{0.92\linewidth}
         \centering
         \includegraphics[width=\linewidth]{figures/heston_vol.pdf}
-        \caption{Simulated Heston variance or volatility paths. The figure highlights the mean-reverting yet stochastic behavior of volatility in the Heston framework.}
+        \caption{Corresponding Heston instantaneous volatility $\sqrt{v_t}$ paths under the same parameter set. The reflection-Euler scheme $v_{t+\Delta t}=|v_t+\kappa(\theta-v_t)\Delta t+\xi\sqrt{v_t\Delta t}\,Z_2|$ from \parencite{andersen2008simple} discretizes the CIR variance dynamics of \parencite{cox1985cir} while keeping $v_t\ge 0$. The white dashed line marks the long-run target $\sqrt{\theta}=0.20$; paths mean-revert toward this level on a timescale $1/\kappa=0.5$ year, with the Feller condition $2\kappa\theta=0.16>\xi^2=0.09$ comfortably satisfied \parencite{feller1951two}.}
         \label{fig:heston_vol.pdf}
     \end{subfigure}
 
-    \caption{Illustration of the stochastic processes underlying the Heston model. The three panels show Brownian motion, simulated asset-price dynamics, and simulated variance dynamics in a single vertical layout.}
+    \caption{Illustration of the stochastic processes underlying the Heston model. The three panels show geometric Brownian motion, Heston asset-price dynamics, and the corresponding CIR variance dynamics in a single vertical layout.}
     \label{fig:heston_process_panel}
 \end{figure}
 
@@ -123,7 +201,7 @@
     \footnotesize
     \setlength{\tabcolsep}{2.5pt}
     \renewcommand{\arraystretch}{1.2}
-    \caption{Inverse PINN training and calibration history with evolving parameter estimates $\kappa$, $\theta$, $\xi$, $\rho$.}
+    \caption{Inverse PINN training and calibration history with evolving parameter estimates $\kappa$, $\theta$, $\xi$, $\rho$. After epoch $25{,}500$ all reported quantities are stationary to the displayed precision; the plateau is indicated by an ellipsis row, with the final epoch ($29{,}999$) shown to mark the end of training.}
     \label{tab:inverse_pinn_calibration_history}
     \begin{adjustbox}{max width=\linewidth}
     \begin{tabular}{rrrrrrrrrrr}
@@ -148,8 +226,7 @@
          22500 & $19.7579$      & $0.587920$  & $0.4024$    & $0.002703$  & $0.0040$    & $0.000000$ & $1.574$ & $0.0269$ & $0.105$ & $0.994$ \\
          24000 & $17.8799$      & $0.548446$  & $0.3758$    & $0.002470$  & $0.0031$    & $0.000000$ & $1.584$ & $0.0267$ & $0.105$ & $0.994$ \\
          25500 & $17.3094$      & $0.533012$  & $0.3654$    & $0.002380$  & $0.0030$    & $0.000000$ & $1.588$ & $0.0266$ & $0.104$ & $0.994$ \\
-         27000 & $17.3094$      & $0.533012$  & $0.3654$    & $0.002380$  & $0.0030$    & $0.000000$ & $1.588$ & $0.0266$ & $0.104$ & $0.994$ \\
-         28500 & $17.3094$      & $0.533012$  & $0.3654$    & $0.002380$  & $0.0030$    & $0.000000$ & $1.588$ & $0.0266$ & $0.104$ & $0.994$ \\
+         \multicolumn{11}{c}{$\cdots$ stationary plateau $\cdots$} \\
          29999 & $17.3094$      & $0.533012$  & $0.3654$    & $0.002380$  & $0.0030$    & $0.000000$ & $1.588$ & $0.0266$ & $0.104$ & $0.994$ \\
         \hline
     \end{tabular}
@@ -160,9 +237,9 @@
 
 \noindent\footnotesize
 \textbf{Notes for Tables~\ref{tab:bs_training_loss_history}--\ref{tab:inverse_pinn_calibration_history}.}
-\textbf{(BS)} 50000 epochs in 12\,min 8\,s; 6250 points (5000 interior, 1000 IC, 250 BC); final total loss $0.102625$.
-\textbf{(Heston)} 50000 epochs in 24\,min 40\,s; 12500 points (10000 interior, 2000 IC, 250 lower-$S$ BC, 250 upper-$S$ BC); final total loss $0.921236$.
-\textbf{(Inverse)} 30000 epochs in 16\,min 17\,s; final losses --- total $17.3094$, PDE $0.533012$, data $0.0030$; final calibrated $\kappa=1.588$, $\theta=0.0266$, $\xi=0.104$, $\rho=0.994$.
+\textbf{(BS)} 50000 epochs in 12\,min 8\,s; 6250 points (5000 interior, 1000 IC, 250 BC); final total loss $0.102625$. Adam with $\eta_0=10^{-3}$, cosine-annealing \parencite{loshchilov2017sgdr} to $\eta_{\min}=10^{-6}$, gradient-norm clipping at $1.0$ \parencite{pascanu2013difficulty}, and loss weights $(\lambda_{\text{PDE}},\lambda_{\text{IC}},\lambda_{\text{BC}})=(10,5,5)$.
+\textbf{(Heston)} 50000 epochs in 24\,min 40\,s; 12500 points (10000 interior, 2000 IC, 250 lower-$S$ BC, 250 upper-$S$ BC); final total loss $0.921236$. Same optimizer schedule with $(\lambda_{\text{PDE}},\lambda_{\text{IC}},\lambda_{\text{BC}})=(10,10,5)$ and a 3-layer, 256-neuron \texttt{tanh} network.
+\textbf{(Inverse)} 30000 epochs in 16\,min 17\,s (25000 Adam + 5000 L-BFGS \parencite{liu1989limited}); final losses --- total $17.3094$, PDE $0.533012$, data $0.0030$; final calibrated $\kappa=1.588$, $\theta=0.0266$, $\xi=0.104$, $\rho=0.994$, with true generating values $\kappa=2.0$, $\theta=0.04$, $\xi=0.3$, $\rho=-0.7$.
 \normalsize
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -171,13 +248,15 @@
 
 \subsection{Black--Scholes PINN}
 
+The Black--Scholes hyperparameter study consists of four sweeps run for $10{,}000$ epochs each on the standard collocation grid (interior, IC, BC). The sweeps varied (i)~depth\,$\times$\,width\,$\times$\,activation (18 combinations over $\{2,3,4\}$ layers, $\{64,128,256\}$ neurons, and \texttt{softplus}/\texttt{tanh}), (ii)~the Adam learning rate, (iii)~the loss-weight triple $(\lambda_{\text{PDE}},\lambda_{\text{IC}},\lambda_{\text{BC}})$, and (iv)~the epoch budget. The leading configurations in every panel use \texttt{tanh} with $\ge 128$ neurons; the architecture sweep's best run was a 2-layer, 256-neuron \texttt{tanh} network with $\text{PDE loss}\approx 5.2\times 10^{-3}$, and this depth/width together with $(\lambda_{\text{PDE}},\lambda_{\text{IC}},\lambda_{\text{BC}})=(10,5,5)$ and $\eta_0=10^{-3}$ was carried forward to the final 50{,}000-epoch run.
+
 \begin{figure}[H]
     \centering
 
     \begin{subfigure}[t]{0.65\linewidth}
         \centering
         \includegraphics[width=\linewidth]{figures/hyper_bs_arch_ranked.pdf}
-        \caption{Architecture ranking.}
+        \caption{Architecture ranking. Final PDE loss across the 18 (depth, width, activation) combinations; \texttt{tanh} consistently outperforms \texttt{softplus} at matched depth/width and at least 128 neurons are needed for sub-$10^{-2}$ PDE residual.}
     \end{subfigure}
 
     \vspace{0.35em}
@@ -185,7 +264,7 @@
     \begin{subfigure}[t]{0.65\linewidth}
         \centering
         \includegraphics[width=\linewidth]{figures/hyper_bs_lr_ranked.pdf}
-        \caption{Learning-rate ranking.}
+        \caption{Learning-rate ranking. Adam with $\eta_0\in[5\times 10^{-4},2\times 10^{-3}]$ sits in the flat region of the loss--$\eta_0$ curve; larger learning rates destabilize the residual under gradient clipping.}
     \end{subfigure}
 
     \vspace{0.35em}
@@ -193,7 +272,7 @@
     \begin{subfigure}[t]{0.65\linewidth}
         \centering
         \includegraphics[width=\linewidth]{figures/hyper_bs_ranked.pdf}
-        \caption{Loss-weight ranking.}
+        \caption{Loss-weight ranking. Configurations with $\lambda_{\text{PDE}}\ge \lambda_{\text{IC}}\ge\lambda_{\text{BC}}$ dominate; placing too much weight on the BC term starves the PDE loss and degrades the interior fit.}
     \end{subfigure}
 
     \vspace{0.35em}
@@ -201,7 +280,7 @@
     \begin{subfigure}[t]{0.65\linewidth}
         \centering
         \includegraphics[width=\linewidth]{figures/hyper_bs_conv_ranked.pdf}
-        \caption{Epoch-budget ranking.}
+        \caption{Epoch-budget ranking. The PDE loss is still decaying at the 10{,}000-epoch budget used in the sweep, which motivates the 50{,}000-epoch final run.}
     \end{subfigure}
 
     \caption{Ranked Black--Scholes hyperparameter sweeps. The panels summarize the architecture, learning-rate, loss-weight, and epoch-budget experiments used to select the final Black--Scholes PINN configuration.}
@@ -215,21 +294,22 @@
 
 
 
-\clearpage
+\clearpage The training curves below resolve the convergence dynamics behind the ranked summaries above. The top-3 architecture and $\lambda$ curves show whether the leading configurations differ mainly in final loss or in early-epoch transient behaviour; the learning-rate and epoch-budget curves expose the oscillation regime at large $\eta_0$ and the unfinished decay at the 10{,}000-epoch budget that motivates the longer final run.
+
 \begin{figure}[H]
     \centering
 
     \begin{subfigure}[t]{0.49\linewidth}
         \centering
         \includegraphics[width=\linewidth]{figures/hyper_bs_arch_top3_curves.pdf}
-        \caption{Training curves for the three best-performing Black--Scholes architectures. The plot compares convergence speed and stability, showing whether the leading architectures differ mainly in final accuracy or in optimization dynamics.}
+        \caption{Training curves for the three best-performing Black--Scholes architectures. All three are \texttt{tanh}-activated networks with $\ge 128$ neurons; they differ in early-epoch transient stability rather than in final accuracy, with the leading 2$\times$256 model already within a factor of two of its final PDE loss by epoch $5000$.}
         \label{fig:hyper_bs_arch_top3_curves.pdf}
     \end{subfigure}
     \hfill
     \begin{subfigure}[t]{0.49\linewidth}
         \centering
         \includegraphics[width=\linewidth]{figures/hyper_bs_lr_curves.pdf}
-        \caption{Training curves for the tested Black--Scholes learning rates. The figure shows how learning-rate selection affects convergence speed, oscillation, and the final loss level.}
+        \caption{Training curves for the tested Black--Scholes learning rates. Curves at $\eta_0\ge 5\times 10^{-3}$ exhibit persistent oscillations even with gradient clipping \parencite{pascanu2013difficulty}, while $\eta_0\in[5\times 10^{-4},2\times 10^{-3}]$ produces monotonic decay; $\eta_0=10^{-3}$ was selected for the final run.}
         \label{fig:hyper_bs_lr_curves.pdf}
     \end{subfigure}
 
@@ -238,14 +318,14 @@
     \begin{subfigure}[t]{0.49\linewidth}
         \centering
         \includegraphics[width=\linewidth]{figures/hyper_bs_top3_curves.pdf}
-        \caption{Training curves for the three best-performing Black--Scholes $\lambda$ configurations. The plot shows whether the strongest loss-weight choices produce consistently smooth convergence or only improve final error after longer training.}
+        \caption{Training curves for the three best-performing Black--Scholes $\lambda$ configurations. All winners satisfy $\lambda_{\text{PDE}}\ge\lambda_{\text{IC}}\ge\lambda_{\text{BC}}$, confirming that the PDE loss must dominate the gradient signal once the payoff has been roughly fitted.}
         \label{fig:hyper_bs_top3_curves.pdf}
     \end{subfigure}
     \hfill
     \begin{subfigure}[t]{0.49\linewidth}
         \centering
         \includegraphics[width=\linewidth]{figures/hyper_bs_conv_curves.pdf}
-        \caption{Training curves for the Black--Scholes convergence experiments. The figure illustrates the relationship between training duration, loss decay, and eventual stabilization of the optimization process.}
+        \caption{Training curves for the Black--Scholes convergence experiments. At the 10{,}000-epoch sweep budget the PDE loss is still decreasing roughly log-linearly with epoch, justifying the 50{,}000-epoch budget of the final run.}
         \label{fig:hyper_bs_conv_curves.pdf}
     \end{subfigure}
 
@@ -253,20 +333,22 @@
     \label{fig:hyper_bs_curves_panel}
 \end{figure}
 
+The four panels below show the per-component loss decomposition of the final 50{,}000-epoch Black--Scholes PINN. The numerical values reported in the captions are read directly from Table~\ref{tab:bs_training_loss_history}.
+
 \begin{figure}[H]
     \centering
 
     \begin{subfigure}[t]{0.49\linewidth}
         \centering
         \includegraphics[width=\linewidth]{figures/pinn_bs_loss_total.pdf}
-        \caption{Total training loss for the final Black--Scholes PINN. This curve summarizes the overall optimization objective across the full training run.}
+        \caption{Total training loss for the final Black--Scholes PINN. The weighted loss drops from $\approx 2.2\times 10^4$ at initialization (dominated by the unfitted payoff) to $0.103$ at epoch $50{,}000$, a reduction of more than five orders of magnitude.}
         \label{fig:pinn_bs_loss_total.pdf}
     \end{subfigure}
     \hfill
     \begin{subfigure}[t]{0.49\linewidth}
         \centering
         \includegraphics[width=\linewidth]{figures/pinn_bs_loss_pde.pdf}
-        \caption{PDE-residual loss for the final Black--Scholes PINN. This component measures how well the learned solution satisfies the Black--Scholes equation in the interior domain.}
+        \caption{PDE residual loss decays from $\approx 4\times 10^{-2}$ at initialization to $\approx 2\times 10^{-3}$ by epoch $50{,}000$, consistent with the gradient-clipped Adam plus cosine-annealing schedule described in the Methods section.}
         \label{fig:pinn_bs_loss_pde.pdf}
     \end{subfigure}
 
@@ -275,14 +357,14 @@
     \begin{subfigure}[t]{0.49\linewidth}
         \centering
         \includegraphics[width=\linewidth]{figures/pinn_bs_loss_ic.pdf}
-        \caption{Initial-condition loss for the final Black--Scholes PINN. This term tracks how accurately the payoff condition at maturity is enforced during training.}
+        \caption{Initial-condition loss for the final Black--Scholes PINN. The kinked $\max(S-K,0)$ payoff is the hardest constraint: this term dominates the total loss throughout training, decaying from $\approx 4.4\times 10^{3}$ to $\approx 1.7\times 10^{-2}$ by epoch $50{,}000$.}
         \label{fig:pinn_bs_loss_ic.pdf}
     \end{subfigure}
     \hfill
     \begin{subfigure}[t]{0.49\linewidth}
         \centering
         \includegraphics[width=\linewidth]{figures/pinn_bs_loss_bc.pdf}
-        \caption{Boundary-condition loss for the final Black--Scholes PINN. This curve shows how well the network respects the imposed boundary behavior at the edges of the spatial domain.}
+        \caption{Boundary-condition loss for the final Black--Scholes PINN. The $V(0,\tau)=0$ Dirichlet condition is easy to satisfy and the BC loss falls below $3\times 10^{-4}$ already by epoch $5000$, contributing negligibly to the total loss thereafter.}
         \label{fig:pinn_bs_loss_bc.pdf}
     \end{subfigure}
 
@@ -296,20 +378,22 @@
 
 \clearpage\subsection{Heston PINN}
 
+The Heston PINN was selected from analogous sweeps over depth/width/activation, learning rate, $\lambda$ triples, and epoch budget on the three-dimensional $(S,v,\tau)$ collocation grid. The best configuration uses three hidden layers of 256 \texttt{tanh} neurons with $(\lambda_{\text{PDE}},\lambda_{\text{IC}},\lambda_{\text{BC}})=(10,10,5)$ and $\eta_0=10^{-3}$ under the same cosine-annealing schedule \parencite{loshchilov2017sgdr}. The per-component loss curves below show the corresponding 50{,}000-epoch run, with the larger Heston state space producing markedly noisier early-training transients than the Black--Scholes case.
+
 \begin{figure}[H]
     \centering
 
     \begin{subfigure}[t]{0.49\linewidth}
         \centering
         \includegraphics[width=\linewidth]{figures/pinn_hs_loss_total.pdf}
-        \caption{Total training loss for the Heston PINN. This curve summarizes the overall optimization objective during training.}
+        \caption{Total training loss for the Heston PINN. The weighted total falls from $\approx 2.5\times 10^{5}$ at initialization (dominated by the upper-$S$ Dirichlet BC) to $\approx 0.92$ at epoch $50{,}000$, with intermittent excursions around epochs $15{,}000$--$22{,}500$ where a transient instability inflates the PDE and BC components by an order of magnitude before the cosine-annealed learning rate damps them.}
         \label{fig:pinn_hs_loss_total.pdf}
     \end{subfigure}
     \hfill
     \begin{subfigure}[t]{0.49\linewidth}
         \centering
         \includegraphics[width=\linewidth]{figures/pinn_hs_loss_pde.pdf}
-        \caption{PDE-residual loss for the Heston PINN. This component tracks how well the learned solution satisfies the Heston equation in the interior domain.}
+        \caption{PDE residual loss for the Heston PINN. Starting from $\approx 3.4\times 10^{-2}$ at initialization (small because the untrained network outputs near-zero values that trivially satisfy the homogeneous PDE), the residual peaks above $100$ during the early payoff-fitting phase and decays to $\approx 3.4\times 10^{-2}$ by epoch $50{,}000$. The mixed second derivative $\partial^2 V/\partial S\partial v$ in the Heston PDE makes this loss noisier than its Black--Scholes counterpart.}
         \label{fig:pinn_hs_loss_pde.pdf}
     \end{subfigure}
 
@@ -318,14 +402,14 @@
     \begin{subfigure}[t]{0.49\linewidth}
         \centering
         \includegraphics[width=\linewidth]{figures/pinn_hs_loss_ic.pdf}
-        \caption{Initial-condition loss for the Heston PINN. This measures how accurately the terminal payoff condition is enforced.}
+        \caption{Initial-condition loss for the Heston PINN. The $\max(S-K,0)$ payoff is enforced at $\tau=0$ across the full $(S,v)$ plane; the IC loss decays from $\approx 4.7\times 10^{3}$ to $\approx 7\times 10^{-2}$ over 50{,}000 epochs.}
         \label{fig:pinn_hs_loss_ic.pdf}
     \end{subfigure}
     \hfill
     \begin{subfigure}[t]{0.49\linewidth}
         \centering
         \includegraphics[width=\linewidth]{figures/pinn_hs_loss_bc.pdf}
-        \caption{Boundary-condition loss for the Heston PINN. This component shows how well the model respects the imposed boundary behavior during training.}
+        \caption{Boundary-condition loss for the Heston PINN, combining the lower-$S$ Dirichlet condition $V(0,v,\tau)=0$ and the upper-$S$ growth condition $V(S_{\max},v,\tau)\approx S_{\max}-Ke^{-r\tau}$. Initialization is dominated by the upper-$S$ term ($\approx 4.1\times 10^{4}$); the loss decays to $\approx 1.6\times 10^{-3}$ by the end of training.}
         \label{fig:pinn_hs_loss_bc.pdf}
     \end{subfigure}
 
@@ -341,17 +425,19 @@
 
 \clearpage\subsection{Inverse PINN}
 
+The inverse PINN was trained on a synthetic Heston dataset of 200 noisy price observations spread across the $(S,v,\tau)$ domain, with the four Heston parameters reparameterized via softplus/\texttt{tanh} (Listing~\ref{lst:invpinn_reparam}). Optimization used Adam for 25{,}000 epochs followed by 5{,}000 L-BFGS \parencite{liu1989limited} refinement steps, with $(\lambda_{\text{PDE}},\lambda_{\text{IC}},\lambda_{\text{BC}},\lambda_{\text{data}},\lambda_{\text{Feller}})=(20,10,5,1000,0.1)$ and a separate Heston-parameter learning rate $\eta_{\text{Heston}}=10^{-3}$. The two figures below trace the loss decomposition and the parameter trajectories; the final calibrated values $(\kappa,\theta,\xi,\rho)=(1.588,0.0266,0.104,0.994)$ should be compared with the data-generating truth $(2.0,0.04,0.3,-0.7)$ from Table~\ref{tab:inverse_pinn_calibration_history}.
+
 \begin{figure}[H]
     \centering
     \includegraphics[width=\textwidth]{figures/pinn_inv_losses.pdf}
-    \caption{Loss decomposition for the inverse PINN calibration. The figure tracks the optimization objective and its constituent terms, showing how the model balances PDE consistency, boundary and initial conditions, market-data fit, and regularization during training.}
+    \caption{Loss decomposition for the inverse PINN calibration. All six terms (total, PDE, IC, BC, data, Feller) decay over the first $\sim 20{,}000$ epochs; the data loss drops below $10^{-2}$ by epoch $20{,}000$ and the Feller penalty stays at machine zero throughout, confirming that the constrained reparameterization keeps the trajectory inside the Feller-admissible region \parencite{feller1951two}.}
     \label{fig:pinn_inv_losses}
 \end{figure}
 
 \begin{figure}[H]
     \centering
     \includegraphics[width=\textwidth]{figures/pinn_inv_params.pdf}
-    \caption{Estimated Heston parameters during inverse PINN calibration. The figure shows the evolution of $\kappa$, $\theta$, $\xi$, and $\rho$, giving a direct view of parameter convergence and stability across epochs.}
+    \caption{Estimated Heston parameters during inverse PINN calibration. $\kappa$ and $\theta$ settle close to (but biased from) their true values within 5000 epochs; $\xi$ collapses rapidly toward $\approx 0.1$ rather than the true $0.3$; and $\rho$ moves monotonically from its initial $0$ to $+0.994$, in the opposite sign to the true $-0.7$. After epoch $\sim 25{,}500$ all four trajectories are stationary, matching the plateau region in Table~\ref{tab:inverse_pinn_calibration_history}.}
     \label{fig:pinn_inv_params}
 \end{figure}
 
@@ -363,7 +449,7 @@
 \begin{figure}[H]
     \centering
     \includegraphics[width=\linewidth]{figures/pinn_inv_final_calibration_report.pdf}
-    \caption{Final inverse Heston PINN calibration diagnostics. The parity plot shows that predicted prices closely match the synthetic market prices, while the error distribution is tightly concentrated around zero. The maturity-slice comparison at $\tau \approx 0.5$ confirms that the learned pricing function fits the observed option-price curve well across asset prices. However, the final parameter comparison shows that accurate price fitting does not imply correct structural recovery: $\kappa$, $\theta$, and $\xi$ are biased, and $\rho$ is recovered with the wrong sign.}
+    \caption{Final inverse Heston PINN calibration diagnostics. The parity plot shows that predicted prices closely match the synthetic market prices, while the error distribution is tightly concentrated around zero. The maturity-slice comparison at $\tau\approx 0.5$ confirms that the learned pricing function fits the observed option-price curve well across asset prices. However, the parameter comparison panel shows that accurate price fitting does not imply correct structural recovery: $\kappa$, $\theta$ and $\xi$ are biased, and $\rho$ is recovered with the wrong sign. The reason is that $\rho$ enters the Heston PDE only through the mixed term $\rho\xi v S\,\partial^2 V/\partial S\partial v$, so it is identifiable only via the leverage skew in the price surface; with $200$ noisy points spread across a wide variance domain this skew signal is too weak to break the symmetry, and the optimizer converges to a $\rho>0$ branch that fits the prices almost as well as the true negative correlation.}
     \label{fig:pinn_inv_final_calibration_report}
 \end{figure}
 
