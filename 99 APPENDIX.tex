@@ -157,7 +157,7 @@
 \textbf{Notes for Tables~\ref{tab:bs_training_loss_history}--\ref{tab:inverse_pinn_calibration_history}.}
 \textbf{(BS)} 50000 epochs in 12\,min 8\,s; 6250 points (5000 interior, 1000 IC, 250 BC); final total loss $0.102625$. Adam with $\eta_0=5\times 10^{-4}$, cosine-annealing \parencite{loshchilov2017sgdr} to $\eta_{\min}=10^{-6}$, gradient-norm clipping at $1.0$ \parencite{pascanu2013difficulty}, and loss weights $(\lambda_{\text{PDE}},\lambda_{\text{IC}},\lambda_{\text{BC}})=(10,5,5)$.
 \textbf{(Heston)} 50000 epochs in 24\,min 40\,s; 12500 points (10000 interior, 2000 IC, 250 lower-$S$ BC, 250 upper-$S$ BC); final total loss $0.921236$. Same optimizer schedule with $\eta_0=5\times 10^{-3}$, $(\lambda_{\text{PDE}},\lambda_{\text{IC}},\lambda_{\text{BC}})=(10,10,5)$, and a 3-layer, 256-neuron \texttt{tanh} network.
-\textbf{(Inverse)} 30000 epochs in 16\,min 17\,s (25000 Adam + 5000 L-BFGS \parencite{liu1989limited}); final losses --- total $17.3094$, PDE $0.533012$, data $0.0030$; final calibrated $\kappa=1.588$, $\theta=0.0266$, $\xi=0.104$, $\rho=0.994$, with true generating values $\kappa=2.0$, $\theta=0.04$, $\xi=0.3$, $\rho=-0.7$.
+\textbf{(Inverse)} 30000 epochs in 16\,min 17\,s (25000 Adam + 5000 L-BFGS \parencite{liu1989limited}); final losses: total $17.3094$, PDE $0.533012$, data $0.0030$; final calibrated $\kappa=1.588$, $\theta=0.0266$, $\xi=0.104$, $\rho=0.994$, with true generating values $\kappa=2.0$, $\theta=0.04$, $\xi=0.3$, $\rho=-0.7$.
 \normalsize
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
