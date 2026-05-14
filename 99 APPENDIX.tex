@@ -1,93 +1,11 @@
 \section{Appendix}\label{section:appendix}
 
-\noindent This appendix collects supplementary material referenced from the main text. It contains short code listings for the most load-bearing pieces of the implementation, full training-loss histories for the three PINNs, ranked and curve-resolved hyperparameter sweep diagnostics, per-component loss decompositions for the final 50{,}000-epoch runs, and the inverse-calibration parity and parameter-trajectory diagnostics. The figures are intentionally redundant with the summaries in the main text, but allow a reader to verify the qualitative claims (cosine-annealed decay of the PDE residual, plateauing of the inverse-problem parameters, ill-identifiability of $\rho$) directly from the raw training output.
-
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-\subsection{Code excerpts}
-
-The three listings below show the architectural building blocks of the implementation. Listing~\ref{lst:bspinn} defines the fully connected forward network used for the Black--Scholes PINN, illustrating the input scaling, Xavier initialization \parencite{glorot2010xavier}, and the choice between softplus and \texttt{tanh} activations. Listing~\ref{lst:hs_residual} shows the automatic-differentiation pass that computes the Heston PDE residual; the first- and second-order derivatives are obtained directly from \texttt{torch.autograd.grad} \parencite{baydin2018automatic} and combined into the residual that is squared and averaged to form the PDE loss. Listing~\ref{lst:invpinn_reparam} shows how the four Heston parameters are reparameterized: softplus enforces positivity of $\kappa$, $\theta$ and $\xi$ and \texttt{tanh} maps the raw correlation parameter into $(-1,1)$, so that the Adam optimizer \parencite{kingma2015adam} always operates on unconstrained variables while the PDE residual sees physically valid Heston parameters.
-
-\begin{lstlisting}[style=python,caption={\texttt{BSPINN} forward network. Inputs $(S,\tau)$ are normalized by \texttt{S\_scale} and \texttt{tau\_scale}, followed by a fully connected stack with configurable depth, width, and activation. Weights are initialized with Xavier-normal and biases with zeros, which empirically improves early convergence for both \texttt{softplus} and \texttt{tanh} activations.},label={lst:bspinn}]
-class BSPINN(nn.Module):
-    def __init__(self, hidden_layers=3, neurons_per_layer=128,
-                 S_scale=300.0, tau_scale=1.0, activation='softplus'):
-        super().__init__()
-        self.S_scale = S_scale
-        self.tau_scale = tau_scale
-        layers = [nn.Linear(2, neurons_per_layer),
-                  nn.Softplus() if activation == 'softplus' else nn.Tanh()]
-        for _ in range(hidden_layers):
-            layers.append(nn.Linear(neurons_per_layer, neurons_per_layer))
-            layers.append(nn.Softplus() if activation == 'softplus' else nn.Tanh())
-        layers.append(nn.Linear(neurons_per_layer, 1))
-        self.net = nn.Sequential(*layers)
-        self._init_weights()
-
-    def _init_weights(self):
-        for m in self.net:
-            if isinstance(m, nn.Linear):
-                nn.init.xavier_normal_(m.weight)
-                nn.init.zeros_(m.bias)
-
-    def forward(self, S, tau):
-        S_norm = S / self.S_scale
-        tau_norm = tau / self.tau_scale
-        x = torch.cat([S_norm, tau_norm], dim=1)
-        return self.net(x)
-\end{lstlisting}
-
-\begin{lstlisting}[style=python,caption={Heston PDE residual via automatic differentiation. The forward pass produces $V$, and three first-order and three second-order partial derivatives are obtained by repeated calls to \texttt{torch.autograd.grad} with \texttt{create\_graph=True}. The residual is the difference between $V_\tau$ and the right-hand side of the Heston PDE; squaring and averaging gives the PDE loss component.},label={lst:hs_residual}]
-V_pred = model(S_in, v_in, tau_in)
-V_S   = torch.autograd.grad(V_pred, S_in,  grad_outputs=grad_ones, create_graph=True)[0]
-V_v   = torch.autograd.grad(V_pred, v_in,  grad_outputs=grad_ones, create_graph=True)[0]
-V_tau = torch.autograd.grad(V_pred, tau_in, grad_outputs=grad_ones, create_graph=True)[0]
-V_SS  = torch.autograd.grad(V_S, S_in, grad_outputs=grad_ones, create_graph=True)[0]
-V_vv  = torch.autograd.grad(V_v, v_in, grad_outputs=grad_ones, create_graph=True)[0]
-V_Sv  = torch.autograd.grad(V_S, v_in, grad_outputs=grad_ones, create_graph=True)[0]
-pde_residual = V_tau - (
-    0.5 * v_in * S_in**2 * V_SS
-    + rho * xi * v_in * S_in * V_Sv
-    + 0.5 * xi**2 * v_in * V_vv
-    + r * S_in * V_S
-    + kappa * (theta - v_in) * V_v
-    - r * V_pred)
-loss_pde = torch.mean(pde_residual**2)
-\end{lstlisting}
-
-\begin{lstlisting}[style=python,caption={Heston parameter reparameterization in \texttt{INVPINN.\_\_init\_\_}. The four Heston parameters are stored as unconstrained \texttt{nn.Parameter} tensors and exposed through properties: softplus enforces $\kappa,\theta,\xi>0$ and \texttt{tanh} enforces $\rho\in(-1,1)$. The initial raw values are computed by applying the corresponding inverse functions (\texttt{\_inv\_softplus}, \texttt{\_inv\_tanh}) to the user-supplied physical initial guesses, so the optimization starts exactly at the requested point in the constrained space.},label={lst:invpinn_reparam}]
-# Store *raw* (unconstrained) values; properties apply softplus / tanh
-# so the physics always receives valid Heston parameters.
-self._raw_kappa = nn.Parameter(_inv_softplus(torch.tensor([float(kappa_init)])))
-self._raw_theta = nn.Parameter(_inv_softplus(torch.tensor([float(theta_init)])))
-self._raw_xi    = nn.Parameter(_inv_softplus(torch.tensor([float(xi_init)])))
-rho_clamped     = max(-0.999, min(0.999, float(rho_init)))
-self._raw_rho   = nn.Parameter(_inv_tanh(torch.tensor([rho_clamped])))
-
-@property
-def kappa(self): return F.softplus(self._raw_kappa)
-@property
-def theta(self): return F.softplus(self._raw_theta)
-@property
-def xi(self):    return F.softplus(self._raw_xi)
-@property
-def rho(self):   return torch.tanh(self._raw_rho)
-\end{lstlisting}
-
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-\clearpage\subsection{Pathways}
-
-The three panels in Figure~\ref{fig:heston_process_panel} provide visual intuition for the stochastic processes that drive the option-pricing PDEs. Standard Monte Carlo background for these simulations is given in \parencite{glasserman2003monte}; the Heston asset path is generated with a log-Euler scheme and the variance path with the reflection-Euler scheme of \parencite{andersen2008simple} for the CIR process \parencite{cox1985cir} that defines the Heston variance dynamics.
+\subsection{Pathways}
 
 \begin{figure}[H]
     \centering
 
-    \begin{subfigure}[t]{0.92\linewidth}
+    \begin{subfigure}[t]{0.75\linewidth}
         \centering
         \includegraphics[width=\linewidth]{figures/brownian_path.pdf}
         \caption{$100$ sample paths of geometric Brownian motion with $S_0=100$, $\mu=0.05$, $\sigma=0.20$, $T=1$ year, and $n=1000$ time steps, simulated via the exact log-Euler scheme $S_{t+\Delta t}=S_t\exp\!\big[(\mu-\tfrac{1}{2}\sigma^2)\Delta t+\sigma\sqrt{\Delta t}\,Z\big]$ with $Z\sim\mathcal{N}(0,1)$. The right panel shows the empirical terminal distribution of $S_T$, which by construction is lognormal; this fixes the constant-volatility benchmark against which the Heston paths in the next two panels deviate \parencite{glasserman2003monte}.}
@@ -96,7 +14,7 @@ The three panels in Figure~\ref{fig:heston_process_panel} provide visual intuiti
 
     \vspace{0.55cm}
 
-    \begin{subfigure}[t]{0.92\linewidth}
+    \begin{subfigure}[t]{0.75\linewidth}
         \centering
         \includegraphics[width=\linewidth]{figures/heston.pdf}
         \caption{$100$ Heston asset paths with $S_0=100$, $v_0=0.04$, $\kappa=2.0$, $\theta=0.04$, $\xi=0.3$, $\rho=-0.7$, $r=0.05$, and $T=1$ year discretized into $100{,}000$ steps. The log-Euler update for $S$ is driven by a Brownian increment $Z_1$, correlated with the variance-driving increment $Z_2=\rho Z_1+\sqrt{1-\rho^2}Z_2^\perp$ as in \parencite{andersen2008simple}. The negative leverage correlation $\rho=-0.7$ produces a left-skewed terminal price distribution (right panel) and heavier left tails than the lognormal benchmark above.}
@@ -105,7 +23,7 @@ The three panels in Figure~\ref{fig:heston_process_panel} provide visual intuiti
 
     \vspace{0.55cm}
 
-    \begin{subfigure}[t]{0.92\linewidth}
+    \begin{subfigure}[t]{0.75\linewidth}
         \centering
         \includegraphics[width=\linewidth]{figures/heston_vol.pdf}
         \caption{Corresponding Heston instantaneous volatility $\sqrt{v_t}$ paths under the same parameter set. The reflection-Euler scheme $v_{t+\Delta t}=|v_t+\kappa(\theta-v_t)\Delta t+\xi\sqrt{v_t\Delta t}\,Z_2|$ from \parencite{andersen2008simple} discretizes the CIR variance dynamics of \parencite{cox1985cir} while keeping $v_t\ge 0$. The white dashed line marks the long-run target $\sqrt{\theta}=0.20$; paths mean-revert toward this level on a timescale $1/\kappa=0.5$ year, with the Feller condition $2\kappa\theta=0.16>\xi^2=0.09$ comfortably satisfied \parencite{feller1951two}.}
@@ -248,12 +166,12 @@ The three panels in Figure~\ref{fig:heston_process_panel} provide visual intuiti
 
 \subsection{Black--Scholes PINN}
 
-The Black--Scholes hyperparameter study consists of four sweeps run for $10{,}000$ epochs each on the standard collocation grid (interior, IC, BC). The sweeps varied (i)~depth\,$\times$\,width\,$\times$\,activation (18 combinations over $\{2,3,4\}$ layers, $\{64,128,256\}$ neurons, and \texttt{softplus}/\texttt{tanh}), (ii)~the Adam learning rate, (iii)~the loss-weight triple $(\lambda_{\text{PDE}},\lambda_{\text{IC}},\lambda_{\text{BC}})$, and (iv)~the epoch budget. The leading configurations in every panel use \texttt{tanh} with $\ge 128$ neurons; the architecture sweep's best run was a 2-layer, 256-neuron \texttt{tanh} network with $\text{PDE loss}\approx 5.2\times 10^{-3}$, and this depth/width together with $(\lambda_{\text{PDE}},\lambda_{\text{IC}},\lambda_{\text{BC}})=(10,5,5)$ and $\eta_0=10^{-3}$ was carried forward to the final 50{,}000-epoch run.
+The Black--Scholes hyperparameter study consists of four sweeps run for $10{,}000$ epochs each on the standard collocation grid (interior, IC, BC). The sweeps varied (i)~depth\,$\times$\,width\,$\times$\,activation (18 combinations over $\{2,3,4\}$ layers, $\{64,128,256\}$ neurons, and \texttt{softplus}/\texttt{tanh}), (ii)~the Adam learning rate, (iii)~the loss-weight triple $(\lambda_{\text{PDE}},\lambda_{\text{IC}},\lambda_{\text{BC}})$, and (iv)~the epoch budget. 
 
 \begin{figure}[H]
     \centering
 
-    \begin{subfigure}[t]{0.65\linewidth}
+    \begin{subfigure}[t]{0.5\linewidth}
         \centering
         \includegraphics[width=\linewidth]{figures/hyper_bs_arch_ranked.pdf}
         \caption{Architecture ranking. Final PDE loss across the 18 (depth, width, activation) combinations; \texttt{tanh} consistently outperforms \texttt{softplus} at matched depth/width and at least 128 neurons are needed for sub-$10^{-2}$ PDE residual.}
@@ -261,7 +179,7 @@ The Black--Scholes hyperparameter study consists of four sweeps run for $10{,}00
 
     \vspace{0.35em}
 
-    \begin{subfigure}[t]{0.65\linewidth}
+    \begin{subfigure}[t]{0.5\linewidth}
         \centering
         \includegraphics[width=\linewidth]{figures/hyper_bs_lr_ranked.pdf}
         \caption{Learning-rate ranking. Adam with $\eta_0\in[5\times 10^{-4},2\times 10^{-3}]$ sits in the flat region of the loss--$\eta_0$ curve; larger learning rates destabilize the residual under gradient clipping.}
@@ -269,7 +187,7 @@ The Black--Scholes hyperparameter study consists of four sweeps run for $10{,}00
 
     \vspace{0.35em}
 
-    \begin{subfigure}[t]{0.65\linewidth}
+    \begin{subfigure}[t]{0.5\linewidth}
         \centering
         \includegraphics[width=\linewidth]{figures/hyper_bs_ranked.pdf}
         \caption{Loss-weight ranking. Configurations with $\lambda_{\text{PDE}}\ge \lambda_{\text{IC}}\ge\lambda_{\text{BC}}$ dominate; placing too much weight on the BC term starves the PDE loss and degrades the interior fit.}
@@ -277,7 +195,7 @@ The Black--Scholes hyperparameter study consists of four sweeps run for $10{,}00
 
     \vspace{0.35em}
 
-    \begin{subfigure}[t]{0.65\linewidth}
+    \begin{subfigure}[t]{0.5\linewidth}
         \centering
         \includegraphics[width=\linewidth]{figures/hyper_bs_conv_ranked.pdf}
         \caption{Epoch-budget ranking. The PDE loss is still decaying at the 10{,}000-epoch budget used in the sweep, which motivates the 50{,}000-epoch final run.}
@@ -292,9 +210,9 @@ The Black--Scholes hyperparameter study consists of four sweeps run for $10{,}00
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
+\newpage\subsubsection{Training curves}
 
-
-\clearpage The training curves below resolve the convergence dynamics behind the ranked summaries above. The top-3 architecture and $\lambda$ curves show whether the leading configurations differ mainly in final loss or in early-epoch transient behaviour; the learning-rate and epoch-budget curves expose the oscillation regime at large $\eta_0$ and the unfinished decay at the 10{,}000-epoch budget that motivates the longer final run.
+The training curves below resolve the convergence dynamics behind the ranked summaries above. The top-3 architecture and $\lambda$ curves show whether the leading configurations differ mainly in final loss or in early-epoch transient behaviour; the learning-rate and epoch-budget curves expose the oscillation regime at large $\eta_0$ and the unfinished decay at the 10{,}000-epoch budget that motivates the longer final run.
 
 \begin{figure}[H]
     \centering
@@ -333,7 +251,11 @@ The Black--Scholes hyperparameter study consists of four sweeps run for $10{,}00
     \label{fig:hyper_bs_curves_panel}
 \end{figure}
 
-The four panels below show the per-component loss decomposition of the final 50{,}000-epoch Black--Scholes PINN. The numerical values reported in the captions are read directly from Table~\ref{tab:bs_training_loss_history}.
+\newpage
+
+\subsubsection{Per-component loss decomposition}
+
+The four panels show the per-component loss decomposition of the final 50{,}000-epoch Black--Scholes PINN. The numerical values reported in the captions are read directly from Table~\ref{tab:bs_training_loss_history}.
 
 \begin{figure}[H]
     \centering
