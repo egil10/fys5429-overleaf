@@ -6,7 +6,7 @@ This section reports the numerical experiments. The three problems are presented
 
 The Black--Scholes experiment uses benchmark parameters $K=100$, $r=0.05$, $\sigma=0.2$, $S_{\max}=300$, $T_{\max}=1$. Four short screening sweeps ($5000$ epochs each) varied architecture, learning rate, loss weights, and epoch budget; the ranked panels are in the appendix (\cref{fig:hyper_bs_ranked_all_appendix}). The architecture sweep is the most informative single diagnostic and is shown in \cref{fig:hyper_bs_arch_heatmap.pdf}: across $\{2,3,4\}$ depths $\times$ $\{64,128,256\}$ widths $\times$ \{\texttt{softplus},$\tanh$\} activations, $\tanh$ networks consistently outperform \texttt{softplus} by an order of magnitude (best $\tanh$ PDE loss $5.19\times 10^{-3}$ versus best \texttt{softplus} above $10^{-2}$), and a wide shallow $2\times 256$ is sufficient, consistent with the real-analytic interior smoothness of the BS surface and the well-documented fragility of higher-order AD through deep networks \parencite{sitzmann2020siren,wang2022expert,pascanu2013difficulty}. The learning-rate sweep singled out $\eta_0=5\times 10^{-4}$ at the bottom of a wide flat region (PDE loss $4.26\times 10^{-3}$, with $10^{-3}$, $3\times 10^{-4}$, $3\times 10^{-3}$ within $20\%$ and $10^{-4}$ failing to converge); the loss-weight sweep found a near-flat plateau in $(\lambda_{\mathrm{pde}},\lambda_{\mathrm{ic}})$ space within which the conservative triple $(10,5,5)$ was retained to protect the long final run from over-fitting the screening criterion; the convergence sweep showed approximately power-law decay of the PDE residual with epoch and no plateau by $10^{4}$ steps, motivating the $5\times 10^4$-epoch final budget.
 
-\begin{figure}[H]
+\begin{figure}[htbp!]
     \centering
     \includegraphics[width=\linewidth]{figures/hyper_bs_arch_heatmap.pdf}
     \caption{Black--Scholes architecture sweep after $5000$ epochs (final PDE residual loss). $\tanh$ activations dominate \texttt{softplus} at every $(\text{depth},\text{width})$ pair, and the best configuration is the wide-shallow $2\times 256$ $\tanh$ network used in the final run.}
@@ -22,7 +22,7 @@ The Black--Scholes experiment uses benchmark parameters $K=100$, $r=0.05$, $\sig
 
 The final Black--Scholes PINN, trained for $50{,}000$ epochs on H100 in $12$ min $08$ s, reaches total loss $0.103$ with the PDE residual decaying from $4.0\times 10^{-2}$ at initialisation to $\approx 2.1\times 10^{-3}$ and the initial-condition loss from $4399$ to $1.7\times 10^{-2}$ (Table~\ref{tab:bs_training_loss_history}). The learned surface in \cref{fig:pinn_bs.pdf} reproduces the analytical Black--Scholes call surface, including the smooth in-the-money plane and the curved out-of-the-money region. At the at-the-money evaluation point $(S,\tau)=(K,T/2)=(100,0.5)$ the PINN predicts $V_{\mathrm{PINN}}=6.927159$ against the closed-form $V_{\mathrm{BS}}=6.888729$, an absolute error of $0.038430$ ($0.56\%$ relative) and a local PDE residual of $2.747\times 10^{-3}$. The autodifferentiated Greeks are internally consistent with the shape of the surface and are reported in \cref{tab:pinn_greeks}; volatility- and rate-derivative Greeks (Vega, Vomma, Vanna, $\rho_r$, $\Phi$) are unavailable because $\sigma,r,q$ are not network inputs, a known limitation of non-parametric PINNs \parencite{lewis2025pinnsoptions} addressable by extending the input space to $\mathbb{R}^5$.
 
-\begin{table}[H]
+\begin{table}[htbp!]
     \centering
     \footnotesize
     \setlength{\tabcolsep}{4pt}
@@ -53,7 +53,7 @@ The final Black--Scholes PINN, trained for $50{,}000$ epochs on H100 in $12$ min
 
 The Heston experiment extends the input to $(S,v,\tau)$ with the canonical parameters $\kappa=2.0$, $\theta=0.04$, $\xi=0.3$, $\rho=-0.7$, $v_0=0.04$, $K=100$, $r=0.05$. Analogous sweeps confirm the qualitative pattern of the Black--Scholes case but in a stiffer regime: the best $5000$-epoch architecture (3 layers, $256$ neurons, $\tanh$) reaches PDE loss $\approx 4.1$, three orders of magnitude worse than the best Black--Scholes architecture at the same budget, because the third spatial dimension, the variance dynamics $\kappa(\theta-v)V_v+\tfrac{1}{2}\xi^2 v V_{vv}$, and the cross term $\rho\xi vS V_{Sv}$ all enter the gradient simultaneously \parencite{wang2021understanding,wang2022expert}. The architecture sweep is shown in \cref{fig:hyper_hs_arch_heatmap.pdf}; the learning-rate, loss-weight, and convergence sweeps singled out $\eta_0=5\times 10^{-3}$ (PDE loss $3.67$ versus $17.7$ at $10^{-2}$), $(\lambda_{\mathrm{pde}},\lambda_{\mathrm{ic}},\lambda_{\mathrm{bc}})=(10,10,5)$, and a monotonic gain through $25{,}000$ epochs that motivated the same $50{,}000$-epoch final budget as the Black--Scholes run.
 
-\begin{figure}[H]
+\begin{figure}[htbp!]
     \centering
     \includegraphics[width=\linewidth]{figures/hyper_hs_arch_heatmap.pdf}
     \caption{Heston architecture sweep after $5000$ epochs. $\tanh$ networks again dominate \texttt{softplus}; depth matters more than for Black--Scholes because the variance direction and the mixed derivative each introduce extra second-order terms in the residual.}
@@ -69,7 +69,7 @@ The Heston experiment extends the input to $(S,v,\tau)$ with the canonical param
 
 The final Heston PINN, trained for $50{,}000$ epochs on A100 in $24$ min $40$ s, reaches total loss $0.921$ with $\mathcal{L}_{\mathrm{pde}}\approx 3.4\times 10^{-2}$ and $\mathcal{L}_{\mathrm{ic}}\approx 7\times 10^{-2}$ (Table~\ref{tab:heston_training_loss_history}); the loss history is visibly noisier than in the Black--Scholes case, with transient excursions near epochs $15{,}000$--$22{,}500$ that the cosine-annealed learning rate eventually damps. The learned surface in \cref{fig:pinn_hs.pdf} captures the correct qualitative shape on the variance slice $v=v_0$. At the same at-the-money evaluation point $(S,v,\tau)=(100,0.04,0.5)$ the PINN predicts $V_{\mathrm{PINN}}=6.806941$ against the semi-analytical Heston value $V_{\mathrm{Heston}}=6.837137$, an absolute error of $0.030196$ ($0.44\%$ relative), in fact slightly better than Black--Scholes in relative terms despite the harder PDE. The local PDE residual is larger in magnitude at $-1.79\times 10^{-1}$; the negative sign means that $V_\tau$ is locally smaller than the operator applied to the network, so the upper-boundary Dirichlet pulls the surface globally in the in-the-money direction at the price of a small honest local residual. \Cref{tab:heston_pinn_greeks} reports the autodifferentiated Greeks. Variance sensitivities (Vega$_v$, Volga$_v$, Vanna$_v$, Zomma$_v$) are now directly accessible because $v$ is an input.
 
-\begin{table}[H]
+\begin{table}[htbp!]
     \centering
     \footnotesize
     \setlength{\tabcolsep}{4pt}
@@ -103,7 +103,7 @@ The final Heston PINN, trained for $50{,}000$ epochs on A100 in $24$ min $40$ s,
 
 The inverse experiment promotes $(\kappa,\theta,\xi,\rho)$ to trainable variables, initialised away from truth at $(\kappa_0,\theta_0,\xi_0,\rho_0)=(1.0,0.1,0.5,0.0)$ and recovered jointly with $\boldsymbol{w}$ from $N_m=200$ noisy synthetic Heston prices. The single inverse-specific hyperparameter is the data-loss weight $\lambda_{\mathrm{data}}$, swept over $\{500,1000,2000\}$ at fixed $(\lambda_{\mathrm{pde}},\lambda_{\mathrm{ic}},\lambda_{\mathrm{bc}},\lambda_{\mathrm{Feller}})=(20,10,5,0.1)$. The data loss falls monotonically with $\lambda_{\mathrm{data}}$ from $1.16\times 10^{-2}$ at $\lambda_{\mathrm{data}}=500$ to $1.26\times 10^{-3}$ at $\lambda_{\mathrm{data}}=2000$, while the relative parameter error \emph{worsens}, the lowest parameter error in fact occurs at $\lambda_{\mathrm{data}}=500$ (\cref{fig:hyper_inv_lambda_data_sweep}). This is the cleanest single-figure statement of the central inverse-problem finding: price fit and parameter recovery are distinct objectives, and improving the former does not improve the latter. The final model uses $\lambda_{\mathrm{data}}=1000$ as a compromise.
 
-\begin{figure}[H]
+\begin{figure}[htbp!]
     \centering
     \includegraphics[width=\linewidth]{figures/hyper_inv_lambda_data_sweep.pdf}
     \caption{Inverse-PINN $\lambda_{\mathrm{data}}$ sweep. Left: PDE and data losses across the three weights. Right: relative parameter recovery error against truth. The lowest data loss is at $\lambda_{\mathrm{data}}=2000$, but the lowest parameter error is at $\lambda_{\mathrm{data}}=500$, so price fit and structural recovery are anti-correlated here.}
@@ -112,7 +112,7 @@ The inverse experiment promotes $(\kappa,\theta,\xi,\rho)$ to trainable variable
 
 The final inverse PINN, trained for $25{,}000$ Adam epochs + $5{,}000$ L-BFGS steps on H100 in $16$ min $17$ s, achieves an excellent price fit but only a partial parameter recovery (\cref{tab:inverse_pinn_summary} and Table~\ref{tab:inverse_pinn_calibration_history}). On the $200$ synthetic observations the mean absolute pricing error is $0.0286$, the maximum is $0.219$, the median relative error is $\approx 0.02\%$, and the parity-plot $R^2=0.999999$. By any pricing metric the calibration succeeded. By a parameter-recovery metric it failed: the recovered $(\kappa,\theta,\xi,\rho)=(1.588,0.0266,0.104,0.994)$ versus the true $(2.0,0.04,0.3,-0.7)$. Most strikingly, $\rho$ converges to a strongly positive value despite the data being generated with the standard equity-market sign $\rho<0$. The Feller penalty stays at machine zero throughout training, confirming that the constrained reparameterisation \eqref{eq:reparam} keeps the trajectory inside the variance-positive region.
 
-\begin{figure}[H]
+\begin{figure}[htbp!]
     \centering
     \includegraphics[width=\linewidth]{figures/pinn_error_surface.pdf}
     \caption{Absolute pricing error of the final inverse PINN across the $200$ synthetic market observations. Errors are small across the sampled $(S,v,\tau)$ region: the network reproduces observed prices accurately even though the recovered Heston parameters are wrong.}
@@ -121,7 +121,7 @@ The final inverse PINN, trained for $25{,}000$ Adam epochs + $5{,}000$ L-BFGS st
 
 The wrong sign of $\rho$ has a clean mechanistic explanation. In the Heston PDE \eqref{eq:heston_pde}, $\rho$ enters only through the cross term $\rho\,\xi\,vS\,V_{Sv}$, the term responsible for the implied-volatility skew \parencite{gatheral2018volatility}, and it always appears multiplied by $\xi$. With only $200$ noisy synthetic prices spread across a three-dimensional $(S,v,\tau)$ region, the skew signal that pins down $\rho$ is too weak to break the price-fit degeneracy: the true product $\xi^\star\rho^\star=(0.3)(-0.7)=-0.21$, while the recovered product $\xi\rho\approx(0.104)(0.994)\approx+0.10$, so the optimiser has not merely flipped the sign of $\rho$ but landed in a structurally different basin of the data-likelihood surface in which a small positive $\xi\rho$ combined with biased $\kappa$ and $\theta$ reproduces the $200$ observations to data loss $3\times 10^{-3}$. This is the multimodality of inverse Heston calibration made explicit, and is exactly the identifiability difficulty that classical calibration handles in practice by fitting an entire implied-volatility surface of $10^{2}$--$10^{3}$ quotes \parencite{gatheral2018volatility,andersen2008simple,rouah2013heston}. With dense strike--maturity data, with implied-volatility (rather than price) targets that nonlinearly amplify the skew signal, and with economically motivated priors on $\rho<0$ for equity underlyings, the inverse PINN can be expected to identify the correct branch; without them the present experiment is the canonical underdetermined-inverse failure mode of \textcite{karniadakis2021physics,mishra2022estimates}.
 
-\begin{table}[H]
+\begin{table}[htbp!]
     \centering
     \footnotesize
     \setlength{\tabcolsep}{4pt}

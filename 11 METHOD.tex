@@ -156,7 +156,7 @@ class INVPINN(nn.Module):
 
 All optimisation is reverse-mode AD on the PyTorch graph \parencite{baydin2018automatic,paszke2019pytorch}; no finite-difference stencil is constructed at any stage. Adam \parencite{kingma2015adam} with cosine-annealed learning rate \parencite{loshchilov2017sgdr}, $\eta_n=\eta_{\min}+\tfrac{1}{2}(\eta_0-\eta_{\min})(1+\cos(n\pi/E))$ and $\eta_{\min}=10^{-6}$, drives Phase~1 training. The global gradient norm is clipped at $1$ \parencite{pascanu2013difficulty} for stability under the imbalanced PINN landscape. For the inverse problem, an L-BFGS quasi-Newton refinement \parencite{liu1989limited} follows the Adam phase with a strong-Wolfe line search (history size $50$, tolerance $10^{-5}$), and clipping is disabled because it interferes with the curvature estimates. \Cref{alg:pinn} summarises the unified procedure; \cref{tab:nn_architectures} records the final configurations from the hyperparameter sweeps of \cref{section:result}.
 
-\begin{algorithm}[H]
+\begin{algorithm}[htbp!]
 \caption{PINN training: forward and (optionally) inverse}\label{alg:pinn}
 \begin{algorithmic}[1]
 \Require collocation $\mathcal{D}_f,\mathcal{D}_{\mathrm{ic}},\mathcal{D}_{\mathrm{bc}}$; if inverse, $\mathcal{D}_m$; weights $\lambda_\bullet$; Adam epochs $E_1$, LBFGS epochs $E_2$; LRs $\eta_0,\eta_{\mathrm{H}}$

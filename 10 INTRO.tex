@@ -6,19 +6,19 @@ Option pricing is one of the clearest examples of how ideas from mathematical ph
 \end{equation}
 where $u(x,t)$ is the state variable, $x$ a spatial coordinate, $t$ time, and $\alpha>0$ a diffusion coefficient. The equation says that local changes in the field are driven by spatial curvature, smoothing irregularities over time, and the same parabolic structure arises, after a suitable change of variables, in option-pricing PDEs.
 
+\begin{figure*}[t]
+    \centering
+    \includegraphics[width=0.95\textwidth]{figures/black2d.pdf}
+    \caption{Terminal payoff functions for a European call and put with $K=100$. The kink at the strike separates out-of-the-money and in-the-money regimes and creates a non-smooth initial condition for the pricing PDE.}
+    \label{fig:black2d.pdf}
+\end{figure*}
+
 The classical Black--Scholes model \parencite{black1973pricing,merton1973rational,capinski2012blackscholes} is the canonical example. Under geometric Brownian motion the value of a European option $V(S,t)$ satisfies a parabolic PDE whose second-order term describes diffusion in the underlying asset price, and admits a probabilistic interpretation as a discounted risk-neutral expected payoff \parencite{shreve2004stochastic,profeta2010option}. The log-moneyness transformation $x=\ln(S/K)$ and time-to-maturity $\tau=T-t$ reduce the Black--Scholes equation to a heat equation \parencite{capinski2012blackscholes}, so option pricing is literally backward diffusion of the terminal payoff into a smooth continuation-value surface. For a European call and put the payoff at expiry is
 \begin{align}
     C(S,0) &= \max(S-K,0), \\
     P(S,0) &= \max(K-S,0),
 \end{align}
 which is continuous but not differentiable at the strike (\cref{fig:black2d.pdf}). This kink is a localised singularity in curvature that must be propagated backward through the smoothing PDE. \Cref{fig:black3d.pdf} shows the resulting surface: smooth for $\tau>0$, with the kinked terminal cross-section at $\tau=0$.
-
-\begin{figure}[htbp!]
-    \centering
-    \includegraphics[width=\linewidth]{figures/black2d.pdf}
-    \caption{Terminal payoff functions for a European call and put with $K=100$. The kink at the strike separates out-of-the-money and in-the-money regimes and creates a non-smooth initial condition for the pricing PDE.}
-    \label{fig:black2d.pdf}
-\end{figure}
 
 \begin{figure*}[t]
     \centering
