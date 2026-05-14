@@ -329,7 +329,7 @@ This confirms that the Heston PINN benefits materially from longer optimization.
 \begin{figure*}[t]
     \centering
     \includegraphics[width=0.9\textwidth]{figures/pinn_hs.pdf}
-    \caption{Final Heston PINN solution after $50\,000$ training epochs, evaluated on the fixed-variance slice $v=v_0=0.04$ and compared with the semi-analytical Heston reference solution. The PINN captures the main structure of the Heston call-price surface, including the low-value out-of-the-money region and the increasing in-the-money region. Since the full learned function depends on $(S,v,\tau)$, this figure shows only a two-dimensional slice of the three-dimensional pricing function.}
+    \caption{Final Heston PINN solution after $50\,000$ training epochs, evaluated on the fixed-variance slice $v=v_0=0.04$ and compared with the semi-analytical Heston reference solution computed by the Fourier-cosine (COS) method of \textcite{fang2008cos}. The PINN captures the main structure of the Heston call-price surface, including the low-value out-of-the-money region and the increasing in-the-money region. Since the full learned function depends on $(S,v,\tau)$, this figure shows only a two-dimensional slice of the three-dimensional pricing function.}
     \label{fig:pinn_hs.pdf}
 \end{figure*}
 
@@ -456,7 +456,7 @@ The inverse experiment therefore combines three objectives. First, the network m
 \end{align*}
 This is a more difficult task than the forward Heston experiment because the optimizer must identify both a high-dimensional function and a small set of latent structural parameters.
 
-The inverse PINN was trained on the same Heston collocation domain as the forward model, augmented with $200$ synthetic market observations. These observations were generated from the Heston model and perturbed with Gaussian noise of standard deviation $0.5$. The neural network used three hidden layers with $256$ neurons per layer. For the inverse experiment, the activation function was changed to a SIREN-type activation, since oscillatory smooth activations can be useful when fitting complex functions and their derivatives. The optimization was performed in two stages: an Adam phase followed by an L-BFGS refinement phase.
+The inverse PINN was trained on the same Heston collocation domain as the forward model, augmented with $200$ synthetic market observations. These observations were generated from the Heston model and perturbed with Gaussian noise of standard deviation $0.5$. The neural network used three hidden layers with $256$ neurons per layer. For the inverse experiment, the activation function was changed to a SIREN-type activation \parencite{sitzmann2020siren}, since oscillatory smooth activations can be useful when fitting complex functions and their derivatives. The optimization was performed in two stages: an Adam phase \parencite{kingma2015adam} followed by an L-BFGS refinement phase \parencite{liu1989limited}.
 
 The trainable Heston parameters were deliberately initialized away from their true values:
 \begin{align*}

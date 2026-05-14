@@ -4,13 +4,77 @@ This section describes the mathematical models, neural-network formulation, auto
 
 The Black--Scholes model is first used as a controlled benchmark with an analytical solution, before extending the same framework to the higher-dimensional Heston stochastic-volatility model and finally to an inverse calibration problem.
 
+\subsection{Notation and conventions}\label{subsec:notation}
+
+Since the project moves between two financial models and a neural-network parameterization, several Greek letters carry context-dependent meanings. To avoid ambiguity, the following conventions are used throughout. The neural-network weights and biases are collected into a single parameter vector $\boldsymbol{w}$, written in boldface, so that the symbol $\theta$ is reserved exclusively for the Heston long-run variance. Likewise, the Black--Scholes rate sensitivity (Rho) is denoted $\rho_r$ to distinguish it from the Heston Brownian correlation $\rho$. Loss-function components carry subscripts identifying their role (PDE residual, initial condition, boundary condition, market data), and each is associated with a non-negative weight $\lambda_{\bullet}$. Collocation-point counts use the symbol $N$ with a subscript indicating the corresponding loss term. The PDE residual operator acting on the network output is denoted $\mathcal{R}_{\boldsymbol{w}}$. These conventions are summarized in \cref{tab:notation}.
+
+\begin{table}[!htbp]
+    \centering
+    \small
+    \setlength{\tabcolsep}{6pt}
+    \renewcommand{\arraystretch}{1.15}
+    \caption{Notation used throughout the Methods section.}
+    \label{tab:notation}
+    \begin{tabularx}{\linewidth}{@{} l X @{}}
+        \toprule
+        \textbf{Symbol} & \textbf{Meaning} \\
+        \midrule
+
+        \multicolumn{2}{@{}l}{\textbf{Financial state variables}} \\
+        $S$              & Underlying asset price \\
+        $v$              & Instantaneous variance (Heston) \\
+        $t$              & Calendar time \\
+        $\tau = T-t$     & Time to maturity \\
+        $T$              & Option maturity \\
+        $K$              & Strike price \\
+        $r$              & Risk-free interest rate \\
+
+        \addlinespace[0.25em]
+        \multicolumn{2}{@{}l}{\textbf{Model parameters}} \\
+        $\sigma$         & Volatility (Black--Scholes) \\
+        $\kappa$         & Mean-reversion speed (Heston) \\
+        $\theta$         & Long-run variance (Heston) \\
+        $\xi$            & Volatility of variance (Heston) \\
+        $\rho$           & Brownian correlation (Heston) \\
+        $v_0$            & Initial variance (Heston) \\
+
+        \addlinespace[0.25em]
+        \multicolumn{2}{@{}l}{\textbf{Pricing function and network}} \\
+        $V$                       & Option price \\
+        $V_{\boldsymbol{w}}$      & PINN approximation of $V$ \\
+        $\boldsymbol{w}$          & Trainable network parameters (weights and biases) \\
+        $\mathcal{R}_{\boldsymbol{w}}$ & PDE residual operator applied to $V_{\boldsymbol{w}}$ \\
+
+        \addlinespace[0.25em]
+        \multicolumn{2}{@{}l}{\textbf{Loss components and weights}} \\
+        $\mathcal{L}_{\mathrm{pde}}$  & PDE-residual loss \\
+        $\mathcal{L}_{\mathrm{ic}}$   & Initial-condition (terminal-payoff) loss \\
+        $\mathcal{L}_{\mathrm{bc}}$   & Boundary-condition loss \\
+        $\mathcal{L}_{\mathrm{data}}$ & Market-data loss (inverse problem) \\
+        $\lambda_{\bullet}$           & Non-negative weight of the corresponding loss term \\
+
+        \addlinespace[0.25em]
+        \multicolumn{2}{@{}l}{\textbf{Collocation point counts}} \\
+        $N_f$            & Interior (PDE) collocation points \\
+        $N_{\mathrm{ic}}$ & Initial-condition points \\
+        $N_{\mathrm{bc}}$ & Boundary-condition points \\
+        $N_m$            & Market-data points (inverse problem) \\
+
+        \addlinespace[0.25em]
+        \multicolumn{2}{@{}l}{\textbf{Greeks notation}} \\
+        $\rho_r$         & Black--Scholes Rho, $\partial V/\partial r$ (distinct from Heston $\rho$) \\
+
+        \bottomrule
+    \end{tabularx}
+\end{table}
+
 \subsection{From option-pricing PDEs to diffusion equations}
 
 The connection between option pricing and physics arises from the diffusion structure of the Black--Scholes equation. Under the standard geometric Brownian motion model,
 \begin{equation}
     dS_t = \mu S_t\,dt + \sigma S_t\,dW_t,
 \end{equation}
-the value $V(S,t)$ of a European option satisfies, under risk-neutral pricing, the Black--Scholes PDE
+the value $V(S,t)$ of a European option satisfies, under risk-neutral pricing, the Black--Scholes PDE \parencite{profeta2010option}
 \begin{equation}\label{eq:bs_pde}
     \frac{\partial V}{\partial t}
     + \frac{1}{2}\sigma^2 S^2 \frac{\partial^2 V}{\partial S^2}
@@ -19,7 +83,7 @@ the value $V(S,t)$ of a European option satisfies, under risk-neutral pricing, t
 \end{equation}
 Here $S$ denotes the underlying asset price, $t$ calendar time, $r$ the risk-free interest rate, and $\sigma$ the volatility.
 
-A key analytical insight is that \cref{eq:bs_pde} can be transformed into a standard diffusion equation. Introducing the log-moneyness coordinate and time-to-maturity variable
+A key analytical insight is that \cref{eq:bs_pde} can be transformed into a standard diffusion equation \parencite{capinski2012blackscholes}. Introducing the log-moneyness coordinate and time-to-maturity variable
 \begin{equation}
     x = \ln\left(\frac{S}{K}\right),
     \qquad
@@ -62,7 +126,7 @@ for a European call option. The lower and upper asset-price boundaries are chose
 
 \subsection{The Heston stochastic-volatility model}
 
-The Black--Scholes assumption of constant volatility is mathematically convenient but empirically restrictive. Market option prices typically imply volatility smiles and skews, suggesting that volatility itself should be treated as stochastic. The Heston model \parencite{heston1993closed} extends Black--Scholes by introducing a stochastic variance process $v_t$:
+The Black--Scholes assumption of constant volatility is mathematically convenient but empirically restrictive. Market option prices typically imply volatility smiles and skews, suggesting that volatility itself should be treated as stochastic \parencite{fouque2011multiscale,gulisashvili2012analytically,swishchuk2008time}. The Heston model \parencite{heston1993closed} extends Black--Scholes by introducing a stochastic variance process $v_t$:
 \begin{align}
     dS_t &= rS_t\,dt + \sqrt{v_t}S_t\,dW_t^S, \\
     dv_t &= \kappa(\theta-v_t)\,dt + \xi\sqrt{v_t}\,dW_t^v,
@@ -88,7 +152,13 @@ The corresponding Heston pricing PDE is
 - rV = 0.
 \end{align}
 
-Compared with the Black--Scholes PDE, the Heston equation introduces both an additional spatial dimension and a mixed derivative term. This makes grid-based numerical methods more demanding, because the computational cost grows rapidly as extra state variables are added. The Heston model is therefore a natural test case for PINNs, whose mesh-free formulation can sample the higher-dimensional domain without constructing a full tensor-product grid.
+Compared with the Black--Scholes PDE, the Heston equation introduces both an additional spatial dimension and a mixed derivative term. This makes grid-based numerical methods more demanding, because the computational cost grows rapidly as extra state variables are added. A PDE-theoretic treatment of the Black--Scholes equation under stochastic volatility is given by \textcite{ekstrom2010bs}. The Heston model is therefore a natural test case for PINNs, whose mesh-free formulation can sample the higher-dimensional domain without constructing a full tensor-product grid. Although the Heston PDE does not admit a simple closed-form solution, a semi-analytical benchmark is available through the Fourier-cosine (COS) method of \textcite{fang2008cos}, which exploits the known characteristic function of the Heston model; this benchmark is used in the Results section to validate the PINN. More recent work has moved beyond classical Markovian stochastic-volatility models toward ``rough'' volatility models driven by fractional Brownian motion \parencite{gatheral2018volatility,bayer2016rough,euch2019roughheston}; these models lie outside the scope of the present project.
+
+\subsection{Theoretical foundations}\label{subsec:theory}
+
+The PINN approach rests on two well-established results from the analysis of neural networks and modern scientific computing. The first is the universal approximation property. Feed-forward neural networks with at least one hidden layer can approximate any continuous function on a compact set to arbitrary precision, provided the activation function is non-polynomial and satisfies mild regularity conditions. \textcite{cybenko1989approximation} established this result for sigmoidal activations, and \textcite{hornik1989multilayer} extended it to the multilayer case with general squashing functions. Universal approximation is a necessary but not sufficient condition for PINNs: it guarantees that a network with sufficient capacity is in principle capable of representing the true solution, but says nothing about whether the optimizer actually finds such a configuration. For PINN training the requirement is also stronger than pointwise approximation of the price surface, since the PDE residual involves first- and second-order partial derivatives; smooth activation functions are therefore needed so that these derivatives are themselves well behaved. Modern mathematical treatments of approximation properties, derivative approximation, and deep-learning theory relevant to PDE-solving networks can be found in \parencite{jentzen2023mathintro,grohs2023mathematical,berner2021modern}.
+
+The second foundation is automatic differentiation. The partial derivatives appearing in the PDE residual are not estimated by finite differences but computed directly through reverse-mode automatic differentiation on the computational graph of the network; see \textcite{baydin2018automatic} for a survey, and \parencite{paszke2019pytorch} for the PyTorch implementation used in this project. This is one reason smooth activations are required: the AD graph must support repeated differentiation, so that mixed and higher-order derivatives such as $\partial^2 V/\partial S\partial v$ can be evaluated stably. The same machinery makes the loss differentiable with respect to any quantity recorded in the graph, including the Heston parameters $\kappa$, $\theta$, $\xi$, and $\rho$ in the inverse problem, which allows the network weights and model parameters to be optimized jointly.
 
 \subsection{Neural-network approximation}
 
@@ -96,13 +166,13 @@ Before introducing the full PINN loss, it is useful to specify the neural-networ
 
 For the Black--Scholes model, the neural network takes the two-dimensional input $(S,\tau)$ and approximates the call-price surface as
 \begin{equation}
-    V_\theta(S,\tau) \approx V(S,\tau),
+    V_{\boldsymbol{w}}(S,\tau) \approx V(S,\tau),
 \end{equation}
 whereas for the Heston model the input is extended to $(S,v,\tau)$:
 \begin{equation}
-    V_\theta(S,v,\tau) \approx V(S,v,\tau).
+    V_{\boldsymbol{w}}(S,v,\tau) \approx V(S,v,\tau).
 \end{equation}
-Here $\theta$ denotes the full collection of trainable weights and biases.
+Here $\boldsymbol{w}$ denotes the full collection of trainable weights and biases.
 
 A fully connected network with $L$ hidden layers can be written recursively as
 \begin{align}
@@ -115,7 +185,7 @@ A fully connected network with $L$ hidden layers can be written recursively as
         \mathbf{b}^{(\ell)}
     \right),
     \qquad \ell=1,\ldots,L, \\
-    V_\theta(\mathbf{x})
+    V_{\boldsymbol{w}}(\mathbf{x})
     &=
     W^{(L+1)}\mathbf{z}^{(L)}
     +
@@ -158,16 +228,16 @@ The activation functions considered in the hyperparameter sweeps were $\tanh$ an
 \end{align}
 Both activation functions are smooth, which is important in the PINN setting because the PDE residual requires first-order, second-order, and mixed derivatives of the neural-network output. Non-smooth activations such as ReLU are less natural here, since their second derivatives are zero or undefined almost everywhere.
 
-Weights were initialized using Xavier normal initialization, with biases initialized to zero. This initialization is standard for feed-forward neural networks and helps prevent activations from becoming too large or too small at the start of training. The trainable parameters were optimized using the Adam optimizer, and the final training runs used a cosine-annealing learning-rate schedule. In simplified notation, the parameter update can be written as
+Weights were initialized using Xavier normal initialization \parencite{glorot2010xavier}, with biases initialized to zero. This initialization is standard for feed-forward neural networks \parencite{goodfellow2016deep} and helps prevent activations from becoming too large or too small at the start of training. The trainable parameters were optimized using the Adam optimizer \parencite{kingma2015adam}, and the final training runs used a cosine-annealing learning-rate schedule \parencite{loshchilov2017sgdr}. In simplified notation, the parameter update can be written as
 \begin{equation}
-    \theta_{n+1}
+    \boldsymbol{w}_{n+1}
     =
-    \theta_n
+    \boldsymbol{w}_n
     -
     \eta_n
-    \widehat{\nabla_\theta \mathcal{L}}(\theta_n),
+    \widehat{\nabla_{\boldsymbol{w}} \mathcal{L}}(\boldsymbol{w}_n),
 \end{equation}
-where $\eta_n$ is the learning rate at iteration $n$ and $\widehat{\nabla_\theta \mathcal{L}}$ denotes Adam's adaptive moment-based gradient estimate.
+where $\eta_n$ is the learning rate at iteration $n$ and $\widehat{\nabla_{\boldsymbol{w}} \mathcal{L}}$ denotes Adam's adaptive moment-based gradient estimate.
 
 The final Black--Scholes PINN used two hidden layers, $256$ neurons per layer, $\tanh$ activation, and learning rate $5\times 10^{-4}$. The final Heston PINN used three hidden layers, $256$ neurons per layer, $\tanh$ activation, and learning rate $5\times 10^{-3}$. These choices were selected empirically from the hyperparameter sweeps reported in the Results section.
 
@@ -175,11 +245,11 @@ The final Black--Scholes PINN used two hidden layers, $256$ neurons per layer, $
 
 A PINN approximates the option-price function by a neural network
 \begin{equation}
-    V_\theta(S,\tau)
+    V_{\boldsymbol{w}}(S,\tau)
     \quad \text{or} \quad
-    V_\theta(S,v,\tau),
+    V_{\boldsymbol{w}}(S,v,\tau),
 \end{equation}
-where $\theta$ denotes the trainable network weights. The network is trained not only to match payoff and boundary information, but also to satisfy the governing PDE in the interior of the domain.
+where $\boldsymbol{w}$ denotes the trainable network weights. The network is trained not only to match payoff and boundary information, but also to satisfy the governing PDE in the interior of the domain.
 
 The total loss is written as a weighted sum of PDE, initial-condition, and boundary-condition terms:
 \begin{equation}\label{eq:pinn_loss}
@@ -198,10 +268,10 @@ The PDE loss is computed as the mean squared residual of the relevant pricing eq
     \frac{1}{N_f}
     \sum_{i=1}^{N_f}
     \left|
-        \mathcal{R}_\theta(\mathbf{x}_i)
+        \mathcal{R}_{\boldsymbol{w}}(\mathbf{x}_i)
     \right|^2,
 \end{equation}
-where $\mathcal{R}_\theta$ is the Black--Scholes or Heston PDE residual evaluated at interior collocation points $\mathbf{x}_i$. For the Black--Scholes model, $\mathbf{x}_i=(S_i,\tau_i)$, while for the Heston model, $\mathbf{x}_i=(S_i,v_i,\tau_i)$.
+where $\mathcal{R}_{\boldsymbol{w}}$ is the Black--Scholes or Heston PDE residual evaluated at interior collocation points $\mathbf{x}_i$. For the Black--Scholes model, $\mathbf{x}_i=(S_i,\tau_i)$, while for the Heston model, $\mathbf{x}_i=(S_i,v_i,\tau_i)$.
 
 The initial-condition loss enforces the payoff at maturity:
 \begin{equation}
@@ -210,7 +280,7 @@ The initial-condition loss enforces the payoff at maturity:
     \frac{1}{N_{\mathrm{ic}}}
     \sum_{i=1}^{N_{\mathrm{ic}}}
     \left|
-        V_\theta(S_i,0) - \max(S_i-K,0)
+        V_{\boldsymbol{w}}(S_i,0) - \max(S_i-K,0)
     \right|^2.
 \end{equation}
 The boundary-condition loss enforces the expected limiting behavior at the edges of the computational domain:
@@ -220,7 +290,7 @@ The boundary-condition loss enforces the expected limiting behavior at the edges
     \frac{1}{N_{\mathrm{bc}}}
     \sum_{i=1}^{N_{\mathrm{bc}}}
     \left|
-        V_\theta(\mathbf{x}^{\mathrm{bc}}_i)
+        V_{\boldsymbol{w}}(\mathbf{x}^{\mathrm{bc}}_i)
         -
         g(\mathbf{x}^{\mathrm{bc}}_i)
     \right|^2,
@@ -229,13 +299,15 @@ where $\mathbf{x}^{\mathrm{bc}}_i$ denotes a boundary collocation point and
 $g(\mathbf{x}^{\mathrm{bc}}_i)$ is the prescribed boundary value at that point.
 For the Black--Scholes call option, the asset-price boundaries are given by
 \begin{align}
-    V_\theta(0,\tau) &\approx 0, \\
-    V_\theta(S_{\max},\tau) &\approx S_{\max} - K e^{-r\tau}.
+    V_{\boldsymbol{w}}(0,\tau) &\approx 0, \\
+    V_{\boldsymbol{w}}(S_{\max},\tau) &\approx S_{\max} - K e^{-r\tau}.
 \end{align}
 For the Heston model, analogous boundary penalties are imposed along both the
 asset-price and variance boundaries.
 
 All derivatives appearing in the PDE residuals are computed using automatic differentiation. This is central to the PINN approach: the model does not approximate derivatives using finite differences, but instead differentiates the neural network directly with respect to its inputs. As a result, first-order, second-order, mixed, and even higher-order sensitivities can be obtained from the same computational graph used during training.
+
+PINNs sit within a broader family of deep-learning PDE solvers. Closely related approaches include the Deep Galerkin Method \parencite{sirignano2018dgm}, which minimizes a residual-based functional over sampled points in a manner conceptually similar to PINNs, and the deep BSDE / forward--backward SDE formulation that reframes the pricing problem as a stochastic control problem solved by neural networks \parencite{han2018solving,e2017deep}. Related Kolmogorov-PDE methods leverage Feynman--Kac representations to learn the solution from simulated paths \parencite{beck2021deep}, and \textcite{beck2020deepbsde} provide a recent overview of the deep BSDE family. Emerging alternative basis architectures such as Kolmogorov--Arnold Networks \parencite{liu2024kan} may also prove well suited to PDE tasks, but are not pursued in this project.
 
 \subsection{Inverse Heston calibration}
 
@@ -260,14 +332,14 @@ where
     \frac{1}{N_m}
     \sum_{i=1}^{N_m}
     \left|
-        V_\theta(S_i,v_i,\tau_i)
+        V_{\boldsymbol{w}}(S_i,v_i,\tau_i)
         -
         V_i^{\mathrm{market}}
     \right|^2.
 \end{equation}
 Here $V_i^{\mathrm{market}}$ denotes the observed or synthetic market price at the sampled point $(S_i,v_i,\tau_i)$. In this project, synthetic prices are generated from the Heston model and perturbed with Gaussian noise in order to mimic imperfect market observations, bid--ask effects, and calibration noise.
 
-The inverse PINN can therefore be viewed as a differentiable calibration engine. Since the PDE residual depends explicitly on $\kappa$, $\theta$, $\xi$, and $\rho$, gradients of the loss with respect to these parameters are obtained directly through automatic differentiation and optimized jointly with the network weights.
+The inverse PINN can therefore be viewed as a differentiable calibration engine \parencite{dhiman2023pinns}. Since the PDE residual depends explicitly on $\kappa$, $\theta$, $\xi$, and $\rho$, gradients of the loss with respect to these parameters are obtained directly through automatic differentiation and optimized jointly with the network weights. After the main Adam training phase, the inverse calibration is refined using the limited-memory BFGS method of \textcite{liu1989limited}, which provides a quasi-Newton update suited for the smooth, low-curvature regime near the optimum.
 
 \subsection{Greeks and automatic differentiation}
 
@@ -307,7 +379,7 @@ The distinction between $\sigma$-Greeks and $v$-Greeks is important. In the Blac
             & $\partial V / \partial \tau$
             & 1st
             & BS/HS \\
-        Rho $(\rho)$
+        Rho $(\rho_r)$
             & $\partial V / \partial r$
             & 1st
             & BS \\
@@ -373,8 +445,8 @@ The distinction between $\sigma$-Greeks and $v$-Greeks is important. In the Blac
         \addlinespace[0.25em]
         \multicolumn{4}{@{}l}{\textbf{PDE diagnostic}} \\
         PDE residual
-            & $\mathcal{R}_\theta$
-            & -- 
+            & $\mathcal{R}_{\boldsymbol{w}}$
+            & --
             & BS/HS \\
 
         \bottomrule
