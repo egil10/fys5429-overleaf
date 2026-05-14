@@ -1,394 +1,89 @@
 \section{Methods}\label{section:methods}
 
-This section describes the mathematical models, the neural-network function class, the automatic-differentiation procedure, and the collocation, training, and calibration strategies used in the project. The overarching goal is to approximate option-price surfaces $V(S,\tau)$ and $V(S,v,\tau)$ by training Physics-Informed Neural Networks (PINNs) \parencite{raissi2019physics,karniadakis2021physics,cuomo2022scientific} that simultaneously satisfy the governing pricing PDEs and respect terminal payoff and asset-price boundary conditions. The Black--Scholes model \parencite{black1973pricing,merton1973rational} is used first as a controlled benchmark with a closed-form solution, before extending the same framework to the higher-dimensional Heston stochastic-volatility model \parencite{heston1993closed} and finally to an inverse calibration problem in which selected Heston parameters are recovered jointly with the network weights from noisy synthetic data.
+This section develops the mathematical models, the neural-network function class, the automatic-differentiation pipeline, and the collocation, training, and calibration strategies used in the project. The objective is to approximate the option-price surfaces $V(S,\tau)$ and $V(S,v,\tau)$ by training Physics-Informed Neural Networks (PINNs) \parencite{raissi2019physics,karniadakis2021physics,cuomo2022scientific} that simultaneously satisfy the governing pricing PDEs and respect the terminal payoff and asset-price boundary conditions. The Black--Scholes model \parencite{black1973pricing,merton1973rational} is used first as a benchmark with a closed-form solution, before the same framework is extended to the Heston stochastic-volatility model \parencite{heston1993closed} and to an inverse calibration in which Heston parameters are recovered jointly with the network weights from noisy synthetic data.
 
-\subsection{Notation and conventions}\label{subsec:notation}
+\subsection{Notation}\label{subsec:notation}
 
-Since the project moves between two financial models and a neural-network parameterization, several Greek letters carry context-dependent meanings. To avoid ambiguity, the following conventions are used throughout. The neural-network weights and biases are collected into a single parameter vector $\boldsymbol{w}$, written in boldface, so that the symbol $\theta$ is reserved exclusively for the Heston long-run variance. Likewise, the Black--Scholes rate sensitivity (Rho) is denoted $\rho_r$ to distinguish it from the Heston Brownian correlation $\rho$. Loss-function components carry subscripts identifying their role (PDE residual, initial condition, boundary condition, market data, Feller penalty), and each is associated with a non-negative weight $\lambda_{\bullet}$. Collocation-point counts use the symbol $N$ with a subscript indicating the corresponding loss term. The PDE residual operator acting on the network output is denoted $\mathcal{R}_{\boldsymbol{w}}$. These conventions are summarized in \cref{tab:notation}.
-
-\begin{table}[!htbp]
-    \centering
-    \small
-    \setlength{\tabcolsep}{6pt}
-    \renewcommand{\arraystretch}{1.15}
-    \caption{Notation used throughout the Methods section.}
-    \label{tab:notation}
-    \begin{tabularx}{\linewidth}{@{} l X @{}}
-        \toprule
-        \textbf{Symbol} & \textbf{Meaning} \\
-        \midrule
-
-        \multicolumn{2}{@{}l}{\textbf{Financial state variables}} \\
-        $S$              & Underlying asset price \\
-        $v$              & Instantaneous variance (Heston) \\
-        $t$              & Calendar time \\
-        $\tau = T-t$     & Time to maturity \\
-        $T$              & Option maturity \\
-        $K$              & Strike price \\
-        $r$              & Risk-free interest rate \\
-
-        \addlinespace[0.25em]
-        \multicolumn{2}{@{}l}{\textbf{Model parameters}} \\
-        $\sigma$         & Volatility (Black--Scholes) \\
-        $\kappa$         & Mean-reversion speed (Heston) \\
-        $\theta$         & Long-run variance (Heston) \\
-        $\xi$            & Volatility of variance (Heston) \\
-        $\rho$           & Brownian correlation (Heston) \\
-        $v_0$            & Initial variance (Heston) \\
-
-        \addlinespace[0.25em]
-        \multicolumn{2}{@{}l}{\textbf{Pricing function and network}} \\
-        $V$                       & Option price \\
-        $V_{\boldsymbol{w}}$      & PINN approximation of $V$ \\
-        $\boldsymbol{w}$          & Trainable network parameters (weights and biases) \\
-        $\mathcal{R}_{\boldsymbol{w}}$ & PDE residual operator applied to $V_{\boldsymbol{w}}$ \\
-
-        \addlinespace[0.25em]
-        \multicolumn{2}{@{}l}{\textbf{Loss components and weights}} \\
-        $\mathcal{L}_{\mathrm{pde}}$    & PDE-residual loss \\
-        $\mathcal{L}_{\mathrm{ic}}$     & Initial-condition (terminal-payoff) loss \\
-        $\mathcal{L}_{\mathrm{bc}}$     & Boundary-condition loss \\
-        $\mathcal{L}_{\mathrm{data}}$   & Market-data loss (inverse problem) \\
-        $\mathcal{L}_{\mathrm{Feller}}$ & Feller-condition penalty (inverse problem) \\
-        $\lambda_{\bullet}$             & Non-negative weight of the corresponding loss term \\
-
-        \addlinespace[0.25em]
-        \multicolumn{2}{@{}l}{\textbf{Collocation point counts}} \\
-        $N_f$            & Interior (PDE) collocation points \\
-        $N_{\mathrm{ic}}$ & Initial-condition points \\
-        $N_{\mathrm{bc}}$ & Boundary-condition points \\
-        $N_m$            & Market-data points (inverse problem) \\
-
-        \addlinespace[0.25em]
-        \multicolumn{2}{@{}l}{\textbf{Greeks notation}} \\
-        $\rho_r$         & Black--Scholes Rho, $\partial V/\partial r$ (distinct from Heston $\rho$) \\
-
-        \bottomrule
-    \end{tabularx}
-\end{table}
-
-\subsection{From the heat equation to option-pricing PDEs}\label{subsec:derivation}
-
-The connection between option pricing and the physics of diffusion is not metaphorical but exact: under the standard frictionless-market assumptions of \textcite{black1973pricing,merton1973rational}, the European option value satisfies a parabolic PDE that reduces to the heat equation \eqref{eq:heat-equation} after a textbook change of variables \parencite{wilmott1995mathematics,capinski2012blackscholes,hull2018options}. We sketch the chain of reductions here because each step has a direct counterpart in the PINN formulation that follows: the stochastic differential equation determines the collocation domain, It\^o's lemma determines the PDE residual operator, and the change of variables explains the conditioning of the network's input normalization.
-
-\paragraph{Step 1: GBM dynamics and It\^o's lemma.} Under the risk-neutral measure $\mathbb{Q}$, the asset price follows the geometric Brownian motion (GBM) of \textcite{black1973pricing},
-\begin{equation}\label{eq:gbm}
-    dS_t = r S_t\,dt + \sigma S_t\,dW_t^{\mathbb{Q}},
-\end{equation}
-with constant drift $r$ and volatility $\sigma$, $W_t^{\mathbb{Q}}$ a standard $\mathbb{Q}$-Brownian motion, and the no-arbitrage requirement that any tradable asset's discounted price be a $\mathbb{Q}$-martingale \parencite{shreve2004stochastic,karatzas1991brownian,oksendal2003sde}. For any sufficiently smooth $V(S,t)\in C^{2,1}$, It\^o's lemma \parencite{itoh1944stochastic} gives
-\begin{align}\label{eq:ito}
-    dV
-    &= \left(\frac{\partial V}{\partial t} + rS\frac{\partial V}{\partial S} + \tfrac{1}{2}\sigma^2 S^2\frac{\partial^2 V}{\partial S^2}\right)dt \notag\\
-    &\quad + \sigma S\frac{\partial V}{\partial S}\,dW_t^{\mathbb{Q}},
-\end{align}
-which already exposes the second-order spatial operator that the PINN will later be asked to reproduce by automatic differentiation.
-
-\paragraph{Step 2: Delta-hedged portfolio and the Black--Scholes PDE.} Consider the hedged portfolio $\Pi_t = V_t - \Delta_t S_t$ with $\Delta_t = \partial V/\partial S$. Substituting \eqref{eq:gbm} and \eqref{eq:ito} into $d\Pi_t = dV_t - \Delta_t\,dS_t$ eliminates the $dW_t^{\mathbb{Q}}$ term and leaves a locally riskless process; equating its drift to the riskless return $r\Pi_t\,dt$ produces the Black--Scholes PDE \parencite{black1973pricing,merton1973rational,wilmott1995mathematics,hull2018options}
-\begin{equation}\label{eq:bs_pde}
-    \frac{\partial V}{\partial t}
-    + \tfrac{1}{2}\sigma^2 S^2\frac{\partial^2 V}{\partial S^2}
-    + rS\frac{\partial V}{\partial S}
-    - rV = 0,
-\end{equation}
-on $(S,t)\in\mathbb{R}_+\times[0,T)$. The same equation arises probabilistically from the Feynman--Kac formula \parencite{feynman1948space,kac1949distributions,shreve2004stochastic}, which represents the solution as the discounted risk-neutral expectation $V(S,t)=e^{-r(T-t)}\mathbb{E}^{\mathbb{Q}}[\,\Psi(S_T)\mid S_t=S\,]$ of the payoff $\Psi$ -- a dual viewpoint that connects \eqref{eq:bs_pde} directly to Monte Carlo pricers \parencite{glasserman2003monte} and, more abstractly, to the deep-BSDE solvers of \textcite{han2018solving,e2017deep}.
-
-\paragraph{Step 3: Reduction to the heat equation.} Introduce log-moneyness $x=\ln(S/K)$, time-to-maturity $\tau=T-t$, and the rescaled price $u(x,\tau)=e^{\alpha x+\beta\tau}V(S,t)$. Choosing $\alpha=-\tfrac{1}{2}+r/\sigma^2$ and $\beta=-\tfrac{1}{2}\sigma^2\alpha^2-r$ cancels the convection $rS\partial_S V$, the reaction $-rV$, and the drift induced by It\^o's correction, leaving the canonical heat equation \parencite{wilmott1995mathematics,capinski2012blackscholes}
-\begin{equation}\label{eq:bs_heat}
-    \frac{\partial u}{\partial \tau} = \tfrac{1}{2}\sigma^2\,\frac{\partial^2 u}{\partial x^2}.
-\end{equation}
-This is the precise sense in which option pricing is diffusion: the kinked payoff $\Psi(x)=\max(Ke^{x}-K,0)$ at $\tau=0$ propagates backwards under \eqref{eq:bs_heat} into a $C^{\infty}$ continuation-value surface for $\tau>0$. The PINN does not exploit this reduction \emph{explicitly} -- it learns $V(S,\tau)$ in the original coordinates -- but the reduction explains why the surface is smooth and why a network with smooth activations is a natural ansatz.
-
-\paragraph{Step 4: From Black--Scholes to Heston.} The constant-volatility assumption is restrictive \parencite{gatheral2018volatility,fouque2011multiscale}, and the natural extension introduces a second SDE for the variance. The Heston model \parencite{heston1993closed} replaces \eqref{eq:gbm} by the correlated Cox--Ingersoll--Ross system \parencite{cox1985cir}
-\begin{align}\label{eq:heston_sde}
-    dS_t &= rS_t\,dt + \sqrt{v_t}\,S_t\,dW_t^{S},\\
-    dv_t &= \kappa(\theta-v_t)\,dt + \xi\sqrt{v_t}\,dW_t^{v},
-\end{align}
-with $dW_t^{S}\,dW_t^{v}=\rho\,dt$. Repeating the It\^o--hedging argument with two sources of randomness (or, equivalently, taking the discounted expectation under the variance-augmented martingale measure) yields the two-dimensional Heston PDE \eqref{eq:heston_pde} introduced below \parencite{heston1993closed,ekstrom2010bs,rouah2013heston}. The structural novelty relative to \eqref{eq:bs_pde} is the mixed derivative $\rho\xi vS\,\partial^2 V/\partial S\partial v$, which encodes the leverage correlation responsible for the implied-volatility skew \parencite{gatheral2018volatility} and which is precisely the term that the inverse PINN of Section~\ref{subsec:inverse} will struggle to identify.
-
-\paragraph{Why this matters for the PINN.} Each step above maps onto a concrete design choice in the network. The SDE \eqref{eq:gbm} (or \eqref{eq:heston_sde}) sets the collocation domain $\mathbb{R}_+\times\mathbb{R}_+\times[0,T]$; It\^o's lemma \eqref{eq:ito} sets the differential operator whose residual is minimized; the reduction \eqref{eq:bs_heat} guarantees that the target $V$ is $C^{\infty}$ on $\tau>0$ and motivates smooth, twice-differentiable activations such as $\tanh$, GELU, and SIREN \parencite{sitzmann2020siren,cuomo2022scientific,karniadakis2021physics}; and the Feynman--Kac viewpoint links the PINN error to the variance of an underlying Monte Carlo estimator, providing one of the few rigorous generalization bounds available for PINNs \parencite{mishra2022estimates,shin2020convergence}.
-
-\subsection{The Black--Scholes model}
-
-The Black--Scholes model \parencite{black1973pricing,merton1973rational} provides a closed-form benchmark for European option prices under the assumptions of constant volatility, continuous trading, frictionless markets, and lognormally distributed asset prices; standard stochastic-calculus treatments are given in \textcite{shreve2004stochastic,capinski2012blackscholes}. For a European call or put with strike $K$ and maturity $T$, define
-\begin{equation}
-    d_1 =
-    \frac{\ln(S/K) + \left(r+\tfrac{1}{2}\sigma^2\right)T}
-    {\sigma\sqrt{T}},
-    \qquad
-    d_2 = d_1 - \sigma\sqrt{T}.
-\end{equation}
-The corresponding call and put prices are
-\begin{align}
-    C &= S N(d_1) - K e^{-rT} N(d_2), \\
-    P &= K e^{-rT} N(-d_2) - S N(-d_1),
-\end{align}
-where $N(\cdot)$ is the standard normal cumulative distribution function. These analytical prices are used as ground truth for validating the Black--Scholes PINN.
-
-For the PINN implementation, the problem is recast in terms of time to maturity $\tau = T-t$. The terminal payoff at expiry therefore becomes an initial condition at $\tau=0$:
-\begin{equation}
-    V(S,0) = \max(S-K,0)
-\end{equation}
-for a European call. The asset-price boundaries are chosen to reflect the asymptotic behavior of the call,
-\begin{align}
-    V(0,\tau) &= 0, \\
-    V(S_{\max},\tau) &\approx S_{\max} - K e^{-r\tau},
-\end{align}
-on the truncated domain $S \in [0, S_{\max}]$ with $S_{\max} = 300$ and $\tau \in [0, T_{\max}]$ with $T_{\max} = 1$.
-
-\subsection{The Heston stochastic-volatility model}
-
-The Black--Scholes assumption of constant volatility is mathematically convenient but empirically restrictive: market option prices typically exhibit volatility smiles and skews, suggesting that volatility itself should be modeled as stochastic \parencite{fouque2011multiscale,gulisashvili2012analytically,swishchuk2008time}. The Heston model \parencite{heston1993closed} extends the Black--Scholes framework with a square-root variance process of Cox--Ingersoll--Ross type \parencite{cox1985cir},
-\begin{align}
-    dS_t &= rS_t\,dt + \sqrt{v_t}\,S_t\,dW_t^S, \\
-    dv_t &= \kappa(\theta-v_t)\,dt + \xi\sqrt{v_t}\,dW_t^v,
-\end{align}
-with instantaneous correlation $dW_t^S\,dW_t^v = \rho\,dt$. The parameters $\kappa>0$, $\theta>0$, $\xi>0$, $\rho\in(-1,1)$, and $v_0>0$ denote the mean-reversion speed, long-run variance, volatility of variance, Brownian correlation, and initial variance, respectively. The Feller condition $2\kappa\theta > \xi^2$ \parencite{feller1951two} ensures that the variance process does not reach zero with positive probability and is satisfied throughout this work by construction.
-
-Under Heston dynamics, the option price depends on three variables, $V=V(S,v,t)$, and satisfies the two-dimensional pricing PDE \parencite{heston1993closed,ekstrom2010bs}
-\begin{align}\label{eq:heston_pde}
-    \frac{\partial V}{\partial t}
-    &+ \tfrac{1}{2}vS^2 \frac{\partial^2 V}{\partial S^2}
-    + \rho\xi vS \frac{\partial^2 V}{\partial S \partial v}
-    + \tfrac{1}{2}\xi^2 v \frac{\partial^2 V}{\partial v^2} \notag \\
-    &+ rS\frac{\partial V}{\partial S}
-    + \kappa(\theta-v)\frac{\partial V}{\partial v}
-    - rV = 0.
-\end{align}
-Compared with \cref{eq:bs_pde}, the Heston equation introduces an additional spatial dimension and a mixed derivative $\partial^2 V/\partial S\partial v$. Standard finite-difference and finite-element schemes \parencite{tavella2000pricing,achdou2005computational} are correspondingly more demanding, since the storage and per-step cost of a tensor-product grid grow exponentially as state variables are added. The PINN approach mitigates this curse of dimensionality through mesh-free Monte Carlo--style sampling of the interior domain \parencite{raissi2019physics,cuomo2022scientific}, in the same sense that the deep-BSDE \parencite{han2018solving,e2017deep,beck2020deepbsde} and Kolmogorov-PDE \parencite{beck2021deep} solvers do. More recent ``rough'' volatility models driven by fractional Brownian motion \parencite{gatheral2018volatility,bayer2016rough,euch2019roughheston,euch2018perfect} sit at the frontier of this literature, with dedicated deep-calibration treatments in \textcite{bayer2019deep,horvath2021deep,glau2022deep}, and lie outside the scope of this project.
-
-\paragraph{Semi-analytical benchmark.} The Heston PDE admits no elementary closed-form solution, but \textcite{heston1993closed} derived a semi-analytical pricing formula based on the characteristic function of the log-price. The European call is expressed as
-\begin{equation}\label{eq:heston_cf_price}
-    C(S_0,v_0,\tau) = S_0 P_1 - K e^{-r\tau} P_2,
-\end{equation}
-where the in-the-money probabilities $P_j$ are recovered by Fourier inversion,
-\begin{equation}\label{eq:heston_pj}
-    P_j = \tfrac{1}{2} + \tfrac{1}{\pi}\int_{0}^{\infty}\,\mathrm{Re}\!\left[\frac{e^{-i\phi\ln K}\,f_j(\phi;S_0,v_0,\tau)}{i\phi}\right]\!d\phi,\qquad j=1,2,
-\end{equation}
-and $f_j$ is the Heston characteristic function of \textcite{heston1993closed}. In this project, equations \eqref{eq:heston_cf_price}--\eqref{eq:heston_pj} are evaluated by direct numerical integration of each $P_j$ via the adaptive Gauss--Kronrod quadrature routine \texttt{scipy.integrate.quad} on the truncated frequency interval $[10^{-4},\,100]$, with the integrand expressed in the original (non-discounted) characteristic form. For maturities below $\tau \le 10^{-4}$ the payoff value is returned directly to avoid the singularity in $1/(i\phi)$. This semi-analytical surface is then used as ground truth for validating the Heston PINN. Related Fourier-pricing approaches include the FFT-based scheme of \textcite{carr1999fft} and the surveys in \parencite{albrecher2007heston,andersen2008simple}. The Fourier-cosine (COS) method of \textcite{fang2008cos} is a faster alternative that exploits the same characteristic function, but is not used here because the simpler quadrature implementation is sufficient for the moderate grid sizes considered.
-
-\subsection{Theoretical foundations}\label{subsec:theory}
-
-The PINN approach rests on two well-established results from the analysis of neural networks and modern scientific computing.
-
-\paragraph{Universal approximation.} Feed-forward neural networks with at least one hidden layer can approximate any continuous function on a compact set to arbitrary precision, provided the activation function is non-polynomial and satisfies mild regularity conditions. \textcite{cybenko1989approximation} established this result for sigmoidal activations, \textcite{hornik1989multilayer} extended it to the multilayer case, and \textcite{pinkus1999approximation} gives the definitive density characterisation for general activations. Universal approximation is necessary but not sufficient for PINNs: it guarantees that a network of sufficient capacity is in principle capable of representing the true solution, but says nothing about whether the optimizer actually finds such a configuration. The PINN requirement is also stronger than pointwise approximation of the price surface, since the PDE residual involves first- and second-order partial derivatives; smooth activations are therefore needed so that these derivatives are themselves well behaved. Convergence and generalization analyses tailored to PINNs are given by \textcite{shin2020convergence,mishra2022estimates}, and modern treatments of derivative approximation and deep-learning theory relevant to PDE-solving networks can be found in \parencite{jentzen2023mathintro,grohs2023mathematical,berner2021modern}.
-
-\paragraph{Automatic differentiation.} The partial derivatives appearing in the PDE residual are not estimated by finite differences but computed directly through reverse-mode automatic differentiation (AD) on the computational graph of the network; see \textcite{baydin2018automatic} for a survey and \parencite{paszke2019pytorch} for the PyTorch implementation used in this project. The AD graph must support repeated differentiation so that mixed and higher-order derivatives such as $\partial^2 V/\partial S\partial v$ can be evaluated stably -- another reason for smooth activations. The same machinery makes the loss differentiable with respect to any quantity recorded in the graph, including the Heston parameters $\kappa$, $\theta$, $\xi$, and $\rho$ in the inverse problem, so that the network weights and model parameters can be optimized jointly.
-
-\paragraph{Monte Carlo interpretation and generalization.} The empirical loss $\mathcal{L}_{\mathrm{pde}}=N_f^{-1}\sum_i |\mathcal{R}_{\boldsymbol{w}}(\mathbf{x}_i)|^2$ is the Monte Carlo estimator of the population residual functional $\mathbb{E}_{\mathbf{x}\sim\mu}[|\mathcal{R}_{\boldsymbol{w}}(\mathbf{x})|^2]$ under the collocation distribution $\mu$ \parencite{raissi2019physics,sirignano2018dgm}. For parabolic problems with sufficiently smooth coefficients and Lipschitz solutions, \textcite{mishra2022estimates,shin2020convergence} establish that the squared $L^2$ error of the trained network decays as $\mathcal{O}(N_f^{-1/2})$ in the number of interior collocation points plus an irreducible optimization gap; the same bound applies to the inverse problem under standard identifiability assumptions \parencite{wang2022respecting}. The forward Heston PINN therefore sits in a regime where increasing $N_f$ from $10^4$ to $10^5$ would reduce the statistical part of the error by roughly a factor of three, while the optimization-gap part is dominated by the gradient-pathology issues of \textcite{wang2021understanding,wang2022expert,krishnapriyan2021characterizing}.
-
-\subsection{Neural-network approximation}
-
-The unknown pricing function is represented by a fully connected feed-forward multilayer perceptron, implemented in PyTorch using the \texttt{torch.nn.Module} interface \parencite{paszke2019pytorch,pytorch_docs}. For the Black--Scholes model, the network maps the two-dimensional input $(S,\tau)$ to a scalar price,
-\begin{equation}
-    V_{\boldsymbol{w}}(S,\tau) \approx V(S,\tau),
-\end{equation}
-whereas for the Heston model the input is extended to $(S,v,\tau)$:
-\begin{equation}
-    V_{\boldsymbol{w}}(S,v,\tau) \approx V(S,v,\tau).
-\end{equation}
-Here $\boldsymbol{w}$ collects the full set of trainable weights and biases.
-
-A fully connected network with $L$ hidden layers can be written recursively as
-\begin{align}
-    \mathbf{z}^{(0)} &= \widetilde{\mathbf{x}}, \\
-    \mathbf{z}^{(\ell)}
-    &=
-    \phi\!\left(
-        W^{(\ell)}\mathbf{z}^{(\ell-1)}
-        +
-        \mathbf{b}^{(\ell)}
-    \right),
-    \qquad \ell=1,\ldots,L, \\
-    V_{\boldsymbol{w}}(\mathbf{x})
-    &=
-    W^{(L+1)}\mathbf{z}^{(L)}
-    +
-    \mathbf{b}^{(L+1)}.
-\end{align}
-For Black--Scholes, $\mathbf{x}=(S,\tau)$, while for Heston, $\mathbf{x}=(S,v,\tau)$. Inputs are linearly normalized before being passed through the network; for Heston,
-\begin{equation}
-    \widetilde{\mathbf{x}}
-    =
-    \left(
-        \frac{S}{S_{\max}},\;
-        \frac{v}{v_{\max}},\;
-        \frac{\tau}{T_{\max}}
-    \right),
-\end{equation}
-which improves numerical conditioning by keeping the network inputs $\mathcal{O}(1)$ \parencite{glorot2010xavier,goodfellow2016deep}.
-
-\paragraph{Activations.} The activation functions supported by the implementation are $\tanh$, $\mathrm{softplus}(x)=\log(1+e^x)$, GELU \parencite{hendrycks2016gelu}, SiLU/Swish \parencite{ramachandran2017swish}, and the sinusoidal activation of SIREN networks \parencite{sitzmann2020siren}. All of these are at least twice continuously differentiable, which is essential because the PDE residual requires $\partial V/\partial\tau$, $\partial V/\partial S$, $\partial^2 V/\partial S^2$, and -- for Heston -- $\partial^2 V/\partial S\partial v$ and $\partial^2 V/\partial v^2$. Non-smooth activations such as ReLU are unsuited to this setting, since their second derivatives are zero or undefined almost everywhere \parencite{cuomo2022scientific,karniadakis2021physics}. Final activations selected after hyperparameter sweeps were $\tanh$ for the Black--Scholes and forward Heston networks and the sinusoidal SIREN activation for the inverse network.
-
-\paragraph{Weight initialization.} The initialization is matched to the chosen activation, following the implementation in \texttt{activations.py}. Layers with $\tanh$, GELU, or SiLU activations use Xavier normal initialization \parencite{glorot2010xavier}; layers with ReLU or softplus activations use Kaiming (He) normal initialization \parencite{he2015delving,goodfellow2016deep}, which is the appropriate variance scaling for one-sided activations; and layers with sinusoidal activations use the SIREN scheme of \textcite{sitzmann2020siren}, $W_{ij}\sim\mathcal{U}\!\big(-\!\sqrt{6/n_{\mathrm{in}}},\,\sqrt{6/n_{\mathrm{in}}}\big)$, which is essential for stable training of high-frequency sinusoidal networks. Biases are initialized to zero in all cases.
-
-\paragraph{Optimization.} Trainable parameters are optimized by the Adam algorithm \parencite{kingma2015adam} with a cosine-annealing learning-rate schedule \parencite{loshchilov2017sgdr},
-\begin{equation}
-    \eta_n = \eta_{\min} + \tfrac{1}{2}\!\left(\eta_0 - \eta_{\min}\right)\!\left(1 + \cos\!\frac{n\pi}{T_{\max}}\right),
-\end{equation}
-with $\eta_{\min} = 10^{-6}$ and $T_{\max}$ equal to the total number of Adam epochs. The base learning rate is $\eta_0 = 5\times10^{-4}$ (Black--Scholes), $5\times10^{-3}$ (forward Heston), or $2\times10^{-3}$ (inverse Heston). To stabilize training under the often ill-conditioned PINN landscape \parencite{wang2021understanding,krishnapriyan2021characterizing}, the global gradient norm is clipped at $1.0$ after each backward pass \parencite{pascanu2013difficulty}:
-\begin{equation}
-    \boldsymbol{g} \leftarrow \boldsymbol{g}\cdot \min\!\left(1,\;\frac{1}{\|\boldsymbol{g}\|_2}\right),
-    \qquad \boldsymbol{g} = \widehat{\nabla_{\boldsymbol{w}}\mathcal{L}}.
-\end{equation}
-A schematic Adam update then reads
-\begin{equation}
-    \boldsymbol{w}_{n+1} = \boldsymbol{w}_n - \eta_n\,\boldsymbol{g}_n,
-\end{equation}
-where $\boldsymbol{g}_n$ is Adam's adaptive moment-based estimate of $\nabla_{\boldsymbol{w}}\mathcal{L}$ after clipping.
-
-\paragraph{Final architectures.} The hyperparameter sweeps reported in the Results section converged on three closely related architectures, summarized in \cref{tab:nn_architectures}. All three are scalar-output multilayer perceptrons trained on PDE, IC, BC, and (for the inverse problem) data losses.
+Because the project combines two financial models with a neural network, several Greek letters carry context-dependent meanings; \cref{tab:notation} fixes the conventions used throughout. The neural-network weights and biases are collected into a single parameter vector $\boldsymbol{w}$, so $\theta$ is reserved for the Heston long-run variance, and the Black--Scholes rate sensitivity is written $\rho_r$ to distinguish it from the Heston correlation $\rho$. Loss components carry subscripts identifying their role (PDE residual, initial condition, boundary condition, data, Feller penalty) and are weighted by non-negative coefficients $\lambda_{\bullet}$. The PDE residual operator acting on the network output is denoted $\mathcal{R}_{\boldsymbol{w}}$.
 
 \begin{table}[!htbp]
     \centering
     \footnotesize
     \setlength{\tabcolsep}{4pt}
-    \renewcommand{\arraystretch}{1.18}
-    \caption{Final network and training configuration for the three PINNs. ``Hidden layers'' counts the internal hidden blocks between the input embedding and the scalar output; widths are constant across layers. Learning rates are base values at the start of the cosine schedule with $\eta_{\min}=10^{-6}$.}
-    \label{tab:nn_architectures}
-    \begin{tabularx}{\linewidth}{@{} l X X X @{}}
+    \renewcommand{\arraystretch}{1.05}
+    \caption{Notation used throughout the report.}
+    \label{tab:notation}
+    \begin{tabularx}{\linewidth}{@{} l X @{}}
         \toprule
-        \textbf{Component} & \textbf{BS PINN} & \textbf{Heston PINN} & \textbf{Inverse PINN} \\
+        \textbf{Symbol} & \textbf{Meaning} \\
         \midrule
-        Input dim                  & $2$ $(S,\tau)$               & $3$ $(S,v,\tau)$             & $3$ $(S,v,\tau)$ \\
-        Hidden layers              & $2$                          & $3$                          & $3$ \\
-        Width per layer            & $256$                        & $256$                        & $256$ \\
-        Activation                 & $\tanh$                      & $\tanh$                      & SIREN (sine) \\
-        Weight init                & Xavier normal                & Xavier normal                & SIREN (Sitzmann) \\
-        Bias init                  & zero                         & zero                         & zero \\
-        Optimizer (Phase 1)        & Adam                         & Adam                         & Adam \\
-        Optimizer (Phase 2)        & --                           & --                           & L-BFGS, strong Wolfe \\
-        Base LR $\eta_0$           & $5\times10^{-4}$             & $5\times10^{-3}$             & $2\times10^{-3}$ (NN), $10^{-3}$ (Heston) \\
-        Min LR $\eta_{\min}$       & $10^{-6}$                    & $10^{-6}$                    & $10^{-6}$ \\
-        LR schedule                & cosine-annealing             & cosine-annealing             & cosine-annealing (Phase 1) \\
-        Epochs                     & $50{,}000$                   & $50{,}000$                   & $25{,}000$ + $5{,}000$ \\
-        Gradient clipping          & $\|g\|_2 \le 1.0$            & $\|g\|_2 \le 1.0$            & Phase 1 only \\
-        $\lambda_{\mathrm{pde}}$   & $10$                         & $10$                         & $20$ \\
-        $\lambda_{\mathrm{ic}}$    & $5$                          & $10$                         & $10$ \\
-        $\lambda_{\mathrm{bc}}$    & $5$                          & $5$                          & $5$ \\
-        $\lambda_{\mathrm{data}}$  & --                           & --                           & $1000$ \\
-        $\lambda_{\mathrm{Feller}}$ & --                          & --                           & $0.1$ \\
+        $S,v,t$ & Asset price, instantaneous variance, calendar time \\
+        $\tau=T-t$ & Time to maturity; $K$ strike; $r$ risk-free rate \\
+        $\sigma$ & Black--Scholes volatility \\
+        $\kappa,\theta,\xi,\rho$ & Heston mean-reversion, long-run variance, vol-of-vol, correlation \\
+        $V,V_{\boldsymbol{w}}$ & Option price and its PINN approximation \\
+        $\boldsymbol{w}$ & Trainable network weights and biases \\
+        $\mathcal{R}_{\boldsymbol{w}}$ & PDE residual operator on $V_{\boldsymbol{w}}$ \\
+        $\mathcal{L}_{\mathrm{pde,ic,bc,data,Feller}}$ & Loss components and weights $\lambda_{\bullet}$ \\
+        $N_f,N_{\mathrm{ic}},N_{\mathrm{bc}},N_m$ & Collocation/data point counts \\
+        $\rho_r$ & Black--Scholes Rho $\partial V/\partial r$ (distinct from $\rho$) \\
         \bottomrule
     \end{tabularx}
 \end{table}
 
-\subsection{Physics-Informed Neural Networks (PINNs)}
+\subsection{Pricing PDEs and closed-form benchmarks}\label{subsec:pdes}
 
-A PINN approximates the option-price function by a neural network $V_{\boldsymbol{w}}$ that is trained not only to match payoff and boundary information, but also to satisfy the governing PDE in the interior of the domain \parencite{raissi2019physics,raissi2017physics1}. The total loss for the forward problems is the weighted sum
+Under the standard risk-neutral assumptions of \textcite{black1973pricing,merton1973rational}, an asset following geometric Brownian motion $dS_t=rS_t\,dt+\sigma S_t\,dW_t^{\mathbb{Q}}$ yields, by It\^o's lemma \parencite{itoh1944stochastic} and a $\Delta$-hedging argument, the Black--Scholes PDE
+\begin{equation}\label{eq:bs_pde}
+    \frac{\partial V}{\partial t}+\tfrac{1}{2}\sigma^2 S^2\frac{\partial^2 V}{\partial S^2}+rS\frac{\partial V}{\partial S}-rV=0,
+\end{equation}
+on $(S,t)\in\mathbb{R}_+\times[0,T)$, with European call terminal data $V(S,T)=\max(S-K,0)$. The same equation arises probabilistically through the Feynman--Kac representation $V(S,t)=e^{-r(T-t)}\mathbb{E}^{\mathbb{Q}}[\Psi(S_T)\mid S_t=S]$ \parencite{shreve2004stochastic}, which connects the deterministic PDE to its Monte Carlo dual \parencite{glasserman2003monte} and to deep-BSDE solvers \parencite{han2018solving,e2017deep,beck2020deepbsde}. After the change of variables $x=\ln(S/K)$, $\tau=T-t$ and a rescaling of $V$, equation \eqref{eq:bs_pde} reduces to the canonical heat equation \eqref{eq:heat-equation} \parencite{wilmott1995mathematics,capinski2012blackscholes}, so option pricing is literally backward diffusion of the kinked payoff into a smooth continuation-value surface. The PINN does not exploit this reduction explicitly, but it explains why $V$ is $C^{\infty}$ on $\tau>0$ and motivates smooth, twice-differentiable activations.
+
+For PINN training the problem is recast on $(S,\tau)$ with $\tau=T-t$, giving the initial condition $V(S,0)=\max(S-K,0)$ and boundary conditions $V(0,\tau)=0$ and $V(S_{\max},\tau)\approx S_{\max}-Ke^{-r\tau}$ on the truncated domain $S\in[0,S_{\max}]$ with $S_{\max}=300$ and $\tau\in[0,T_{\max}]$ with $T_{\max}=1$. The closed-form European call $C=SN(d_1)-Ke^{-r\tau}N(d_2)$ with $d_1=[\ln(S/K)+(r+\tfrac{1}{2}\sigma^2)\tau]/(\sigma\sqrt{\tau})$, $d_2=d_1-\sigma\sqrt{\tau}$ \parencite{black1973pricing} serves as exact ground truth.
+
+The Heston model \parencite{heston1993closed} replaces constant volatility with a CIR variance process \parencite{cox1985cir}, $dS_t=rS_t\,dt+\sqrt{v_t}\,S_t\,dW_t^S$ and $dv_t=\kappa(\theta-v_t)\,dt+\xi\sqrt{v_t}\,dW_t^v$ with $dW_t^S\,dW_t^v=\rho\,dt$. The Feller condition $2\kappa\theta>\xi^2$ \parencite{feller1951two} prevents $v$ from hitting zero. Repeating the $\Delta$-hedging argument with two noise sources yields the three-dimensional pricing PDE \parencite{ekstrom2010bs,rouah2013heston}
+\begin{align}\label{eq:heston_pde}
+    \frac{\partial V}{\partial t}
+    &+\tfrac{1}{2}vS^2\frac{\partial^2 V}{\partial S^2}
+    +\rho\xi vS\frac{\partial^2 V}{\partial S\partial v}
+    +\tfrac{1}{2}\xi^2 v\frac{\partial^2 V}{\partial v^2} \notag\\
+    &+rS\frac{\partial V}{\partial S}+\kappa(\theta-v)\frac{\partial V}{\partial v}-rV=0,
+\end{align}
+whose structural novelty is the mixed-derivative term $\rho\xi vS\,V_{Sv}$ encoding the leverage-skew correlation \parencite{gatheral2018volatility}. This term is precisely the one that makes the inverse problem in \cref{subsec:inverse} ill-conditioned. The Heston PDE admits no elementary closed form, but \textcite{heston1993closed} derived the semi-analytical Fourier representation
+\begin{equation}\label{eq:heston_cf_price}
+    C(S_0,v_0,\tau)=S_0 P_1-Ke^{-r\tau}P_2,
+\end{equation}
+where
+\begin{equation}\label{eq:heston_pj}
+    P_j=\tfrac{1}{2}+\tfrac{1}{\pi}\int_0^{\infty}\mathrm{Re}\!\left[\frac{e^{-i\phi\ln K}f_j(\phi;S_0,v_0,\tau)}{i\phi}\right]d\phi,
+\end{equation}
+with $f_j$ the Heston characteristic function. In this work \eqref{eq:heston_pj} is evaluated by adaptive Gauss--Kronrod quadrature on $\phi\in[10^{-4},100]$ via \texttt{scipy.integrate.quad}; this is the canonical reference underlying the COS \parencite{fang2008cos} and FFT \parencite{carr1999fft,albrecher2007heston} alternatives. \Cref{fig:heston_process_panel} in the appendix shows the simulated GBM, Heston asset, and CIR variance paths used to sanity-check the collocation domain.
+
+\subsection{PINN formulation}\label{subsec:pinn}
+
+The unknown pricing function is represented by a fully connected feed-forward network in PyTorch \parencite{paszke2019pytorch}. With $L$ hidden layers the network is the composition
+\begin{align}\label{eq:network}
+    \mathbf{z}^{(0)} &= \widetilde{\mathbf{x}},\notag\\
+    \mathbf{z}^{(\ell)} &= \phi\!\big(W^{(\ell)}\mathbf{z}^{(\ell-1)}+\mathbf{b}^{(\ell)}\big),\quad \ell=1,\ldots,L,\notag\\
+    V_{\boldsymbol{w}}(\mathbf{x}) &= W^{(L+1)}\mathbf{z}^{(L)}+\mathbf{b}^{(L+1)},
+\end{align}
+where $\widetilde{\mathbf{x}}=(S/S_{\max},v/v_{\max},\tau/T_{\max})$ normalises every input to $\mathcal{O}(1)$ for stable conditioning \parencite{glorot2010xavier,goodfellow2016deep}. The activation $\phi$ is $\tanh$ for the forward problems and the sinusoidal SIREN activation of \textcite{sitzmann2020siren} for the inverse problem; both are $C^{\infty}$, which is essential because the residual involves $V_S$, $V_\tau$, $V_{SS}$, and for Heston also $V_{Sv}$ and $V_{vv}$. \texttt{softplus} was tested in the architecture sweep but consistently lost to $\tanh$ (\cref{section:result}); ReLU is unsuitable because its second derivative is zero or undefined almost everywhere \parencite{cuomo2022scientific}. Weights are initialised by Xavier-normal \parencite{glorot2010xavier} for $\tanh$ and by the SIREN scheme \parencite{sitzmann2020siren} for sinusoidal layers; biases are zero.
+
+\paragraph{Theoretical footing.} Universal approximation \parencite{cybenko1989approximation,hornik1989multilayer,pinkus1999approximation} guarantees that a sufficiently wide network can represent the true solution on a compact set. The PINN requirement is stronger than pointwise approximation, however, because the residual involves first- and second-order partial derivatives -- which is the second reason smooth activations are essential. Convergence and generalisation analyses tailored to PINNs on parabolic problems \parencite{shin2020convergence,mishra2022estimates} bound the squared $L^2$ error of the trained network as $\mathcal{O}(N_f^{-1/2})$ plus an irreducible optimisation gap. The Monte Carlo interpretation of $\mathcal{L}_{\mathrm{pde}}$ as the empirical estimator of the population residual $\mathbb{E}_{\mathbf{x}\sim\mu}[|\mathcal{R}_{\boldsymbol{w}}(\mathbf{x})|^2]$ under the collocation distribution $\mu$ \parencite{raissi2019physics,sirignano2018dgm} links the PINN error to the variance of an underlying Monte Carlo estimator and provides one of the few rigorous generalisation bounds available for PINNs. For the forward Heston problem this places the experiment at $N_f=10^4$ in a regime where the statistical part of the error is small relative to the gradient-pathology optimisation gap of \textcite{wang2021understanding,wang2022expert,krishnapriyan2021characterizing}.
+
+A PINN trains $\boldsymbol{w}$ to satisfy a composite loss \parencite{raissi2019physics,raissi2017physics1}
 \begin{equation}\label{eq:pinn_loss}
-    \mathcal{L}(\boldsymbol{w})
-    =
-    \lambda_{\mathrm{pde}}\,\mathcal{L}_{\mathrm{pde}}
-    + \lambda_{\mathrm{ic}}\,\mathcal{L}_{\mathrm{ic}}
-    + \lambda_{\mathrm{bc}}\,\mathcal{L}_{\mathrm{bc}}.
+    \mathcal{L}(\boldsymbol{w})=\lambda_{\mathrm{pde}}\mathcal{L}_{\mathrm{pde}}+\lambda_{\mathrm{ic}}\mathcal{L}_{\mathrm{ic}}+\lambda_{\mathrm{bc}}\mathcal{L}_{\mathrm{bc}},
 \end{equation}
-The PDE residual loss is the mean squared residual of the pricing equation evaluated at interior collocation points,
-\begin{equation}
-    \mathcal{L}_{\mathrm{pde}}
-    =
-    \frac{1}{N_f}\sum_{i=1}^{N_f}
-    \left|\mathcal{R}_{\boldsymbol{w}}(\mathbf{x}_i)\right|^2,
-\end{equation}
-where $\mathbf{x}_i=(S_i,\tau_i)$ for Black--Scholes and $\mathbf{x}_i=(S_i,v_i,\tau_i)$ for Heston, and $\mathcal{R}_{\boldsymbol{w}}$ denotes the strong-form residual obtained by substituting $V_{\boldsymbol{w}}$ and its AD-computed derivatives into \cref{eq:bs_pde} or \cref{eq:heston_pde}. The initial-condition loss enforces the payoff at maturity,
-\begin{equation}
-    \mathcal{L}_{\mathrm{ic}}
-    =
-    \frac{1}{N_{\mathrm{ic}}}\sum_{i=1}^{N_{\mathrm{ic}}}
-    \left|V_{\boldsymbol{w}}(S_i,0)-\max(S_i-K,0)\right|^2,
-\end{equation}
-and the boundary-condition loss enforces the prescribed asymptotic behavior,
-\begin{equation}
-    \mathcal{L}_{\mathrm{bc}}
-    =
-    \frac{1}{N_{\mathrm{bc}}}\sum_{i=1}^{N_{\mathrm{bc}}}
-    \left|V_{\boldsymbol{w}}(\mathbf{x}^{\mathrm{bc}}_i)-g(\mathbf{x}^{\mathrm{bc}}_i)\right|^2,
-\end{equation}
-with $g$ given by $g(0,\tau)=0$ at the lower asset-price boundary and, where used, $g(S_{\max},\tau)=S_{\max}-Ke^{-r\tau}$ at the upper one. All derivatives entering $\mathcal{R}_{\boldsymbol{w}}$ are computed by reverse-mode AD \parencite{baydin2018automatic,paszke2019pytorch}, so no finite-difference stencil is constructed at any stage.
+with
+\begin{align}
+    \mathcal{L}_{\mathrm{pde}} &= \frac{1}{N_f}\sum_{i=1}^{N_f}\big|\mathcal{R}_{\boldsymbol{w}}(\mathbf{x}_i)\big|^2,\\
+    \mathcal{L}_{\mathrm{ic}}  &= \frac{1}{N_{\mathrm{ic}}}\sum_{i=1}^{N_{\mathrm{ic}}}\big|V_{\boldsymbol{w}}(S_i,0)-\max(S_i-K,0)\big|^2,\\
+    \mathcal{L}_{\mathrm{bc}}  &= \frac{1}{N_{\mathrm{bc}}}\sum_{i=1}^{N_{\mathrm{bc}}}\big|V_{\boldsymbol{w}}(\mathbf{x}^{\mathrm{bc}}_i)-g(\mathbf{x}^{\mathrm{bc}}_i)\big|^2,
+\end{align}
+where $\mathcal{R}_{\boldsymbol{w}}$ is obtained by substituting $V_{\boldsymbol{w}}$ and its reverse-mode AD derivatives \parencite{baydin2018automatic} into \eqref{eq:bs_pde} or \eqref{eq:heston_pde}, and $g$ encodes the asset-price boundaries. Listing~\ref{lst:residual} shows how the Heston residual is assembled with six \texttt{torch.autograd.grad} calls; \texttt{create\_graph=True} is essential so that the residual itself remains differentiable when backpropagating $\mathcal{L}_{\mathrm{pde}}$ into $\boldsymbol{w}$ and, in the inverse problem, into the latent Heston parameters. The mixed second derivative $V_{Sv}$ is obtained as the variance-direction gradient of $V_S$, the only graph-safe order under reverse-mode AD when $S$ and $v$ enter on different branches.
 
-\paragraph{PINN failure modes and loss balancing.} A recurring difficulty with PINN training is that the gradients of $\mathcal{L}_{\mathrm{pde}}$, $\mathcal{L}_{\mathrm{ic}}$, and $\mathcal{L}_{\mathrm{bc}}$ are typically of very different magnitudes, which produces unbalanced updates and slow convergence. \textcite{wang2021understanding} attribute this to gradient pathologies arising from the multi-objective structure of the loss, \textcite{wang2022expert} analyze the same phenomenon through the lens of the neural tangent kernel, and \textcite{krishnapriyan2021characterizing} document a family of regimes in which naive PINNs fail to converge to the correct PDE solution. In practice, the loss weights $\lambda_{\bullet}$ in \cref{eq:pinn_loss} are treated as hyperparameters chosen by grid search; the values used in this project are reported in \cref{tab:nn_architectures}. General reviews of the PINN literature and surrounding software ecosystem are given by \textcite{karniadakis2021physics}, \textcite{cuomo2022scientific}, and \textcite{lu2021deepxde}; an early application of PINNs to option-pricing PDEs analogous to ours is \textcite{lewis2025pinnsoptions}.
-
-\paragraph{Related deep-learning PDE solvers.} PINNs sit within a broader family of deep-learning PDE solvers. Closely related approaches include the Deep Galerkin Method of \textcite{sirignano2018dgm}, which minimizes a similar residual-based functional over sampled points; the deep BSDE / forward--backward SDE formulation that reframes the pricing problem as a stochastic control problem solved by neural networks \parencite{han2018solving,e2017deep,beck2020deepbsde}; Kolmogorov-PDE methods that learn the solution from Feynman--Kac--simulated paths \parencite{beck2021deep}; and classical Monte Carlo benchmarks \parencite{glasserman2003monte}. Emerging alternative basis architectures such as Kolmogorov--Arnold networks \parencite{liu2024kan} may also prove well suited to PDE tasks but are not pursued here.
-
-\subsection{Training algorithms}\label{subsec:algorithms}
-
-The full training procedure for the forward Black--Scholes and Heston PINNs is summarised in Algorithm~\ref{alg:forward_pinn}; the two-stage Adam + L-BFGS schedule used for the inverse Heston calibration is summarised in Algorithm~\ref{alg:inverse_pinn}. Both algorithms operate on the same composite-loss template and use reverse-mode AD to obtain every partial derivative entering the residual.
-
-\begin{algorithm}[H]
-\caption{Forward PINN training (Black--Scholes and Heston)}
-\label{alg:forward_pinn}
-\begin{algorithmic}[1]
-\Require interior $\mathcal{D}_f$, IC $\mathcal{D}_{\mathrm{ic}}$, BC $\mathcal{D}_{\mathrm{bc}}$; weights $\lambda_\bullet$; epochs $E$; base LR $\eta_0$
-\State Initialise $V_{\boldsymbol{w}}$ with activation-matched scheme \parencite{glorot2010xavier,he2015delving,sitzmann2020siren}
-\State Adam state $\leftarrow$ defaults; cosine schedule $\eta_n$ over $E$ \parencite{kingma2015adam,loshchilov2017sgdr}
-\For{$n=1,\ldots,E$}
-    \State Forward pass: $V \leftarrow V_{\boldsymbol{w}}(\mathbf{x}_f)$, then AD for $V_S, V_\tau, V_{SS}$ (and $V_v, V_{vv}, V_{Sv}$ for Heston)
-    \State $\mathcal{R} \leftarrow$ strong-form residual of \cref{eq:bs_pde} / \cref{eq:heston_pde}
-    \State $\mathcal{L}_{\mathrm{pde}} \leftarrow \|\mathcal{R}\|^2/N_f$
-    \State $\mathcal{L}_{\mathrm{ic}} \leftarrow \|V_{\boldsymbol{w}}(\mathbf{x}_{\mathrm{ic}})-\max(S-K,0)\|^2/N_{\mathrm{ic}}$
-    \State $\mathcal{L}_{\mathrm{bc}} \leftarrow \|V_{\boldsymbol{w}}(\mathbf{x}_{\mathrm{bc}})-g\|^2/N_{\mathrm{bc}}$
-    \State $\mathcal{L} \leftarrow \lambda_{\mathrm{pde}}\mathcal{L}_{\mathrm{pde}} + \lambda_{\mathrm{ic}}\mathcal{L}_{\mathrm{ic}} + \lambda_{\mathrm{bc}}\mathcal{L}_{\mathrm{bc}}$
-    \State Backpropagate $\nabla_{\boldsymbol{w}}\mathcal{L}$; clip to $\|g\|_2 \le 1$ \parencite{pascanu2013difficulty}
-    \State Adam step with $\eta_n$; advance cosine schedule
-\EndFor
-\State \Return $V_{\boldsymbol{w}}$, loss history
-\end{algorithmic}
-\end{algorithm}
-
-\begin{algorithm}[H]
-\caption{Inverse Heston PINN (two-stage Adam + L-BFGS)}
-\label{alg:inverse_pinn}
-\begin{algorithmic}[1]
-\Require collocation $\mathcal{D}_f,\mathcal{D}_{\mathrm{ic}},\mathcal{D}_{\mathrm{bc}}$, market $\mathcal{D}_m$; weights $\lambda_\bullet$; epochs $E_1$ (Adam), $E_2$ (L-BFGS); LRs $\eta_{\mathrm{nn}},\eta_{\mathrm{H}}$
-\State Initialise $V_{\boldsymbol{w}}$ (SIREN) and latent $(\tilde\kappa,\tilde\theta,\tilde\xi,\tilde\rho)$ from user guesses via inverse softplus / atanh
-\State Constrain on-the-fly: $\kappa=\mathrm{softplus}(\tilde\kappa)$, \ldots, $\rho=\tanh(\tilde\rho)$
-\State Adam with two parameter groups (LRs $\eta_{\mathrm{nn}},\eta_{\mathrm{H}}$); cosine schedule over $E_1$
-\For{$n=1,\ldots,E_1$ (Phase 1: Adam)}
-    \State Compute $\mathcal{L}_{\mathrm{pde}},\mathcal{L}_{\mathrm{ic}},\mathcal{L}_{\mathrm{bc}}$ as in Alg.~\ref{alg:forward_pinn}, plus $\mathcal{L}_{\mathrm{data}}$ on $\mathcal{D}_m$
-    \State $\mathcal{L}_{\mathrm{Feller}} \leftarrow [\mathrm{ReLU}(\xi^2-2\kappa\theta)]^2$ \parencite{feller1951two,cox1985cir}
-    \State $\mathcal{L} \leftarrow \sum_{\bullet}\lambda_{\bullet}\mathcal{L}_{\bullet}$; backprop; clip; Adam step; schedule step
-\EndFor
-\For{$n=1,\ldots,E_2$ (Phase 2: L-BFGS, strong-Wolfe)}
-    \State \textbf{closure}: zero grads, recompute $\mathcal{L}$, backprop \emph{without} clipping
-    \State L-BFGS step($\,$closure$\,$) \parencite{liu1989limited}
-\EndFor
-\State \Return $V_{\boldsymbol{w}}$, calibrated $(\kappa,\theta,\xi,\rho)$, loss \& parameter history
-\end{algorithmic}
-\end{algorithm}
-
-\subsection{Code structure and key listings}\label{subsec:code}
-
-The implementation \parencite{furnes2026fys5429code} is deliberately small and modular. The four library files (\texttt{sample.py}, \texttt{activations.py}, \texttt{bspinn.py}, \texttt{hspinn.py}, \texttt{invpinn.py}, \texttt{train\_bs.py}, \texttt{train\_hs.py}, \texttt{train\_inv.py}) are each under $130$ lines, and three Jupyter notebooks (one per experiment) drive them with the hyperparameter values reported in \cref{tab:nn_architectures}. The data flow is uniform across all three experiments: pre-sampled collocation parquet files $\to$ tensorisation on the GPU $\to$ PINN class $\to$ loss assembly with AD $\to$ Adam (and optionally L-BFGS) loop $\to$ logged history $\to$ post-training diagnostics. Two implementation choices are reported in code below because they materially affect the result and are easy to get wrong.
-
-\paragraph{PINN class with smooth activation and Xavier init (Listing~\ref{lst:hspinn}).} The Heston forward network is a textbook fully-connected MLP; the only nontrivial choices are the $\tanh$ activation (twice differentiable, required for the second-order AD passes), input normalization (the network sees $\widetilde{\mathbf{x}}=(S/300,v,\tau)\in[0,1]^3$ rather than the raw physical scales), and Xavier-normal weight initialization \parencite{glorot2010xavier} matched to $\tanh$. The Black--Scholes network is identical except for the two-input head.
-
-\begin{lstlisting}[language=Python,caption={Heston forward PINN class (\texttt{hspinn.py}, edited for brevity). The same template is used for Black--Scholes with a $2$-dim input head.},label={lst:hspinn}]
-class HSPINN(nn.Module):
-    def __init__(self, hidden_layers=3, neurons=256,
-                 S_scale=300., v_scale=1., tau_scale=1.,
-                 activation='tanh'):
-        super().__init__()
-        self.S_scale, self.v_scale = S_scale, v_scale
-        self.tau_scale = tau_scale
-        act = nn.Tanh if activation=='tanh' else nn.Softplus
-        layers = [nn.Linear(3, neurons), act()]
-        for _ in range(hidden_layers):
-            layers += [nn.Linear(neurons, neurons), act()]
-        layers += [nn.Linear(neurons, 1)]
-        self.net = nn.Sequential(*layers)
-        for m in self.net:
-            if isinstance(m, nn.Linear):
-                nn.init.xavier_normal_(m.weight)
-                nn.init.zeros_(m.bias)
-
-    def forward(self, S, v, tau):
-        x = torch.cat([S/self.S_scale,
-                       v/self.v_scale,
-                       tau/self.tau_scale], dim=1)
-        return self.net(x)
-\end{lstlisting}
-
-\paragraph{PDE residual via reverse-mode AD (Listing~\ref{lst:residual}).} The full Heston residual is assembled by six separate \texttt{torch.autograd.grad} calls with \texttt{create\_graph=True}, allowing the residual itself to be differentiated again when backpropagating $\mathcal{L}_{\mathrm{pde}}$ into $\boldsymbol{w}$ (and, in the inverse problem, into the latent Heston parameters). The mixed second derivative $V_{Sv}$ is obtained as the variance-direction gradient of the previously computed $V_S$, which is the only safe order under PyTorch's reverse-mode AD when the variables enter on different branches of the graph.
-
-\begin{lstlisting}[language=Python,caption={Heston PDE residual assembled by reverse-mode AD inside the training loop.},label={lst:residual}]
+\begin{lstlisting}[language=Python,caption={Heston PDE residual assembled by reverse-mode AD.},label={lst:residual}]
 V = model(S, v, tau)
 g  = torch.ones_like(V)
 V_S   = grad(V, S,   grad_outputs=g, create_graph=True)[0]
@@ -406,7 +101,25 @@ R = V_tau - (0.5*v*S**2*V_SS
 loss_pde = (R**2).mean()
 \end{lstlisting}
 
-\paragraph{Parameter reparameterization for the inverse problem (Listing~\ref{lst:reparam}).} The four Heston parameters are stored as unconstrained latent variables $\tilde{\bullet}\in\mathbb{R}$ and exposed through smooth bijective transforms. This is the single change that prevents the optimizer from drifting into nonphysical regions ($\kappa\le 0$, $|\rho|\ge 1$) and is the reason the Feller penalty remains numerically zero throughout training.
+The relative gradient magnitudes of the three loss components are typically very imbalanced \parencite{wang2021understanding,wang2022expert,krishnapriyan2021characterizing}: at initialisation the unfitted payoff produces $\mathcal{L}_{\mathrm{ic}}\sim 10^{3}$, $\mathcal{L}_{\mathrm{bc}}\sim 10^{4}$ (Heston only), while the residual evaluated on the near-zero output network is $\sim 10^{-2}$, so the gradient of $\mathcal{L}$ is dominated by the boundary and initial terms before the PDE constraint can act. This is the dominant source of PINN training instability and the reason the weights $\lambda_{\bullet}$ are tuned by grid search (\cref{section:result}). PINNs sit within a broader family of deep-learning PDE solvers including the Deep Galerkin Method \parencite{sirignano2018dgm}, deep-BSDE schemes \parencite{han2018solving,e2017deep,beck2020deepbsde}, Kolmogorov-PDE methods \parencite{beck2021deep}, and emerging basis architectures such as Kolmogorov--Arnold networks \parencite{liu2024kan}.
+
+\subsection{Inverse calibration}\label{subsec:inverse}
+
+In the inverse problem the four Heston parameters $(\kappa,\theta,\xi,\rho)$ are promoted to trainable variables and recovered jointly with $\boldsymbol{w}$ from $N_m=200$ noisy synthetic prices, with the same physics losses retained. The augmented loss is
+\begin{equation}\label{eq:inverse_loss}
+    \mathcal{L}_{\mathrm{inv}}=\lambda_{\mathrm{pde}}\mathcal{L}_{\mathrm{pde}}+\lambda_{\mathrm{ic}}\mathcal{L}_{\mathrm{ic}}+\lambda_{\mathrm{bc}}\mathcal{L}_{\mathrm{bc}}+\lambda_{\mathrm{data}}\mathcal{L}_{\mathrm{data}}+\lambda_{\mathrm{Feller}}\mathcal{L}_{\mathrm{Feller}},
+\end{equation}
+with $\mathcal{L}_{\mathrm{data}}=N_m^{-1}\sum_i|V_{\boldsymbol{w}}(S_i,v_i,\tau_i)-V_i^{\mathrm{market}}|^2$ and the soft Feller penalty
+\begin{equation}\label{eq:feller_loss}
+    \mathcal{L}_{\mathrm{Feller}}=\big[\mathrm{ReLU}(\xi^2-2\kappa\theta)\big]^2,
+\end{equation}
+which vanishes whenever $2\kappa\theta\ge\xi^2$ \parencite{feller1951two,cox1985cir}. The synthetic observations are produced from true parameters $(\kappa^\star,\theta^\star,\xi^\star,\rho^\star)=(2.0,0.04,0.3,-0.7)$ via \eqref{eq:heston_cf_price} with additive Gaussian noise of standard deviation $0.5$.
+
+Adam updates the trainable parameters without constraint, which would routinely push the Heston parameters into nonphysical regions ($\kappa\le0$ or $|\rho|\ge 1$). To prevent this, the four parameters are stored as \emph{unconstrained} latent variables $\tilde{\bullet}\in\mathbb{R}$ and exposed through smooth bijective transforms
+\begin{equation}\label{eq:reparam}
+    \kappa=\mathrm{softplus}(\tilde\kappa),\quad \theta=\mathrm{softplus}(\tilde\theta),\quad \xi=\mathrm{softplus}(\tilde\xi),\quad \rho=\tanh(\tilde\rho),
+\end{equation}
+so that the PDE residual, Feller penalty, and data loss are always evaluated at physically admissible values. Gradients flow through the transforms by chain rule. This single design choice keeps the Feller penalty at machine zero throughout training and is implemented in Listing~\ref{lst:reparam}.
 
 \begin{lstlisting}[language=Python,caption={Constrained Heston parameters as differentiable properties (\texttt{invpinn.py}).},label={lst:reparam}]
 class INVPINN(nn.Module):
@@ -421,8 +134,6 @@ class INVPINN(nn.Module):
             torch.tensor([xi_init])))
         self._raw_rho   = nn.Parameter(_inv_tanh(
             torch.tensor([max(-.999, min(.999, rho_init))])))
-        # ... MLP layers as in HSPINN ...
-
     @property
     def kappa(self): return F.softplus(self._raw_kappa)
     @property
@@ -433,280 +144,131 @@ class INVPINN(nn.Module):
     def rho(self):   return torch.tanh(self._raw_rho)
 \end{lstlisting}
 
-\subsection{Testing, verification, and benchmarks}\label{subsec:testing}
+\subsection{Training}\label{subsec:training}
 
-Although a PINN is mesh-free and self-supervised by the PDE, the training and evaluation pipeline is unit-tested at four points; the same checks are used as exit criteria for the hyperparameter sweeps reported in \cref{section:result}.
+All optimisation is reverse-mode AD on the PyTorch graph \parencite{baydin2018automatic,paszke2019pytorch}; no finite-difference stencil is constructed at any stage. Adam \parencite{kingma2015adam} with cosine-annealed learning rate \parencite{loshchilov2017sgdr}, $\eta_n=\eta_{\min}+\tfrac{1}{2}(\eta_0-\eta_{\min})(1+\cos(n\pi/E))$ and $\eta_{\min}=10^{-6}$, drives Phase~1 training. The global gradient norm is clipped at $1$ \parencite{pascanu2013difficulty} for stability under the imbalanced PINN landscape. For the inverse problem, an L-BFGS quasi-Newton refinement \parencite{liu1989limited} follows the Adam phase with a strong-Wolfe line search (history size $50$, tolerance $10^{-5}$), and clipping is disabled because it interferes with the curvature estimates. \Cref{alg:pinn} summarises the unified procedure; \cref{tab:nn_architectures} records the final configurations from the hyperparameter sweeps of \cref{section:result}.
 
-\paragraph{Closed-form Black--Scholes benchmark.} The Black--Scholes PINN is validated against the analytical call price $C=SN(d_1)-Ke^{-rT}N(d_2)$ of \textcite{black1973pricing,merton1973rational} at the at-the-money point $(S,\tau)=(K,T/2)$. With benchmark parameters $K=100,r=0.05,\sigma=0.2$ the reference value is $C=6.888729$; the trained PINN reports $6.927159$, an absolute error of $0.0384$ ($0.56\%$ relative). The same closed form provides ground truth for any other $(S,\tau)$ query and is used pointwise in the absolute-error figures of \cref{section:result}.
-
-\paragraph{Semi-analytical Heston benchmark.} The Heston PINN is validated against the characteristic-function pricer \eqref{eq:heston_cf_price}--\eqref{eq:heston_pj} of \textcite{heston1993closed}, evaluated by \texttt{scipy.integrate.quad} on $[10^{-4},100]$ in Fourier space. Faster alternatives exist -- the FFT method of \textcite{carr1999fft}, the Fourier-cosine (COS) expansion of \textcite{fang2008cos}, and the ``little Heston trap'' regularised characteristic function of \textcite{albrecher2007heston} -- but adaptive Gauss--Kronrod quadrature was sufficient for the grid sizes used here, and is the cleanest reference for a one-off benchmark.
-
-\paragraph{Sanity checks at no extra cost.} Three additional consistency checks are performed on every trained model. \emph{(i) Put--call parity:} the trained call surface combined with the analytical relation $C-P=S-Ke^{-r\tau}$ produces an implied put surface; deviations from the analytical put price stay below $10^{-2}$ at the at-the-money point. \emph{(ii) Boundary residuals:} on the held-out boundary set $S=0$, the network output $V_{\boldsymbol{w}}(0,\tau)$ stays at $\mathcal{O}(10^{-4})$ throughout the $\tau$ range, matching the Dirichlet condition without it ever being part of $\mathcal{L}_{\mathrm{bc}}$. \emph{(iii) AD versus finite differences:} reverse-mode AD derivatives at the evaluation point agree with $h=10^{-3}$ central differences to $4$ significant figures, ruling out a wrong-residual bug as an explanation for the small remaining PDE-loss values.
-
-\paragraph{Monte Carlo cross-check.} As a third independent benchmark, a $10^{5}$-path Monte Carlo pricer \parencite{glasserman2003monte} based on the log-Euler GBM scheme (and the reflection-Euler Heston scheme of \textcite{andersen2008simple,lord2010comparison} for the stochastic-volatility case) was used during development to spot-check both the PINN and the semi-analytical pricer at a handful of points; agreement was within standard Monte Carlo error in all cases. These checks are not reported as a separate result table because they reproduce the benchmarks above to within statistical noise, but they protect the PINN evaluation against systematic bugs in either reference solution.
-
-\subsection{Inverse Heston calibration}\label{subsec:inverse}
-
-In the inverse problem, the goal is no longer only to approximate the price surface for known parameters: the four Heston parameters $\{\kappa,\theta,\xi,\rho\}$ are themselves treated as trainable variables and recovered from noisy synthetic market observations, jointly with the network weights. The PINN therefore functions as a differentiable calibration engine \parencite{dhiman2023pinns,lewis2025pinnsoptions}, in which AD provides exact gradients of the loss with respect to both $\boldsymbol{w}$ and the model parameters.
-
-\paragraph{Augmented loss.} The training objective is extended by a market-data term and a soft Feller penalty:
-\begin{equation}\label{eq:inverse_loss}
-    \mathcal{L}_{\mathrm{inv}}(\boldsymbol{w},\kappa,\theta,\xi,\rho)
-    =
-    \lambda_{\mathrm{pde}}\mathcal{L}_{\mathrm{pde}}
-    +\lambda_{\mathrm{ic}}\mathcal{L}_{\mathrm{ic}}
-    +\lambda_{\mathrm{bc}}\mathcal{L}_{\mathrm{bc}}
-    +\lambda_{\mathrm{data}}\mathcal{L}_{\mathrm{data}}
-    +\lambda_{\mathrm{Feller}}\mathcal{L}_{\mathrm{Feller}},
-\end{equation}
-where
-\begin{equation}
-    \mathcal{L}_{\mathrm{data}}
-    =
-    \frac{1}{N_m}\sum_{i=1}^{N_m}
-    \left|V_{\boldsymbol{w}}(S_i,v_i,\tau_i) - V_i^{\mathrm{market}}\right|^2.
-\end{equation}
-The synthetic prices $V_i^{\mathrm{market}}$ are generated from the true Heston parameters $(\kappa^\star,\theta^\star,\xi^\star,\rho^\star)=(2.0,0.04,0.3,-0.7)$ using the semi-analytical formula \eqref{eq:heston_cf_price} and perturbed with additive Gaussian noise of standard deviation $0.5$, which crudely mimics microstructure noise, bid--ask effects, and calibration error. The Feller penalty is implemented as
-\begin{equation}\label{eq:feller_loss}
-    \mathcal{L}_{\mathrm{Feller}}
-    =
-    \left[\mathrm{ReLU}\!\left(\xi^2 - 2\kappa\theta\right)\right]^2,
-\end{equation}
-which is zero whenever the Feller condition $2\kappa\theta\geq\xi^2$ holds \parencite{feller1951two,cox1985cir} and grows quadratically with the magnitude of violation. For the parameters used here, the penalty was numerically zero throughout training and acts only as a safety guard.
-
-\paragraph{Parameter reparameterization.} Calibrating $\kappa$, $\theta$, $\xi$, and $\rho$ directly is awkward because Adam updates are unconstrained and would routinely push these parameters into nonphysical regions ($\kappa\le0$, $|\rho|\ge1$). To eliminate this failure mode the implementation stores \emph{unconstrained} latent variables $\tilde\kappa,\tilde\theta,\tilde\xi,\tilde\rho\in\mathbb{R}$ as the actual trainable parameters and exposes the physical Heston parameters through smooth bijective transforms,
-\begin{align}\label{eq:reparam}
-    \kappa &= \mathrm{softplus}(\tilde\kappa),\qquad
-    \theta = \mathrm{softplus}(\tilde\theta),\qquad
-    \xi    = \mathrm{softplus}(\tilde\xi),\\
-    \rho   &= \tanh(\tilde\rho),
-\end{align}
-where $\mathrm{softplus}(x)=\log(1+e^x)>0$ enforces strict positivity and $\tanh$ confines $\rho$ to $(-1,1)$. The optimizer therefore sees the unconstrained $\tilde\bullet$ parameters, while the PDE residual, Feller penalty, and data loss are always evaluated at physically admissible values. User-specified initial guesses $(\kappa_0,\theta_0,\xi_0,\rho_0)=(1.0,0.1,0.5,0.0)$ are mapped to the latent space by the inverse transforms $\tilde\kappa_0=\mathrm{softplus}^{-1}(\kappa_0)$, $\tilde\theta_0=\mathrm{softplus}^{-1}(\theta_0)$, $\tilde\xi_0=\mathrm{softplus}^{-1}(\xi_0)$, $\tilde\rho_0=\mathrm{atanh}(\rho_0)$, with $\rho_0$ clipped into $(-0.999,0.999)$ before the inverse $\tanh$. Gradients with respect to the Heston parameters flow back through the differentiable transforms by chain rule, exactly as for any other AD-tracked quantity.
-
-\paragraph{Two-stage optimization.} The combined parameter space $(\boldsymbol{w};\tilde\kappa,\tilde\theta,\tilde\xi,\tilde\rho)$ has a broad, nonconvex landscape with sharp local minima near the true parameters. A two-stage strategy is used.
-
-\emph{Phase 1 -- Adam (broad basin search).} For the first $25{,}000$ epochs the loss \eqref{eq:inverse_loss} is minimized with Adam \parencite{kingma2015adam} using two parameter groups with separate learning rates: $\eta_0=2\times10^{-3}$ for the NN weights and biases, and $\eta_0=10^{-3}$ for the Heston latent parameters. The smaller learning rate for the latent parameters reflects their direct nonlinear coupling to the PDE residual through the reparameterizations \eqref{eq:reparam}. A single cosine-annealing scheduler is applied to both groups with $\eta_{\min}=10^{-6}$ and $T_{\max}=25{,}000$ \parencite{loshchilov2017sgdr}. Gradient clipping at unit norm is applied after every backward pass for stability \parencite{pascanu2013difficulty}.
-
-\emph{Phase 2 -- L-BFGS (precision fine-tuning).} For the final $5{,}000$ epochs, training switches to the limited-memory BFGS quasi-Newton method \parencite{liu1989limited}, configured with \texttt{max\_iter=1} per outer step, history size $50$, gradient tolerance $10^{-5}$, parameter tolerance $10^{-9}$, and a strong-Wolfe line search. L-BFGS is well suited to the smooth low-curvature regime near a local minimum and routinely reduces the residual by several further orders of magnitude in PINN problems \parencite{raissi2019physics,cuomo2022scientific}. Crucially, gradient clipping is \emph{not} applied during Phase 2: clipping interferes with the curvature estimates and step-length selection of the strong-Wolfe search and is known to break the convergence properties of L-BFGS. Together, the two phases combine Adam's stochastic robustness for the broad search with L-BFGS's deterministic precision near the optimum.
-
-\subsection{Greeks and automatic differentiation}
-
-The Greeks measure the sensitivity of an option price to changes in state variables, time, and model parameters. In classical numerical implementations these quantities are estimated by bump-and-revalue, which becomes prohibitively expensive for mixed, higher-order, or model-specific sensitivities. In the PINN framework the Greeks are obtained directly by differentiating the trained price function $V_{\boldsymbol{w}}$ using the same AD machinery that constructs the PDE residual \parencite{baydin2018automatic,paszke2019pytorch}. First-order, second-order, and third-order derivatives can therefore be extracted from the learned surface without any finite-difference stencil or re-evaluation of the pricer.
-
-\paragraph{Black--Scholes Greeks: which are accessible by AD?} A subtle but important point is that the Black--Scholes PINN takes only $(S,\tau)$ as inputs; the volatility $\sigma$, risk-free rate $r$, and dividend yield $q$ are baked into the trained weights as constants. Consequently, only Greeks expressible as derivatives with respect to $S$ or $\tau$ are directly available from the trained network -- namely Delta, Theta, Gamma, Charm, Speed, and Color. Volatility- and rate-sensitive Greeks (Vega $\partial V/\partial\sigma$, Vomma, Vanna, Zomma, $\rho_r=\partial V/\partial r$, $\Phi=\partial V/\partial q$) are \emph{not} obtainable from this network by AD; recovering them would require training a \emph{parametric PINN} in which $\sigma$, $r$, and $q$ enter as additional inputs. In the Heston setting the variance state $v$ is already an input, so the variance-direction sensitivities Vega$_v$, Volga$_v$, Vanna$_v$, and Zomma$_v$ \emph{are} directly accessible by AD, in addition to the $S$- and $\tau$-Greeks. The Greeks computed in this project are summarized in \cref{tab:greeks_expressions}, with the BS-only volatility/rate Greeks listed for reference and marked as unavailable from the present non-parametric network.
-
-\paragraph{$\sigma$-Greeks versus $v$-Greeks.} In the Black--Scholes model, volatility is a constant model parameter $\sigma$, so Vega-type quantities are derivatives with respect to $\sigma$. In the Heston model, volatility enters through the variance state variable $v$, and the corresponding quantities measure how the learned price surface changes along the variance dimension. The Heston quantities Vega$_v$, Volga$_v$, Vanna$_v$, and Zomma$_v$ should therefore be interpreted as variance-state sensitivities rather than direct Black--Scholes volatility sensitivities.
+\begin{algorithm}[H]
+\caption{PINN training: forward and (optionally) inverse}\label{alg:pinn}
+\begin{algorithmic}[1]
+\Require collocation $\mathcal{D}_f,\mathcal{D}_{\mathrm{ic}},\mathcal{D}_{\mathrm{bc}}$; if inverse, $\mathcal{D}_m$; weights $\lambda_\bullet$; Adam epochs $E_1$, LBFGS epochs $E_2$; LRs $\eta_0,\eta_{\mathrm{H}}$
+\State Initialise $V_{\boldsymbol{w}}$ with activation-matched scheme; if inverse, latent $\tilde\kappa,\tilde\theta,\tilde\xi,\tilde\rho$ from guesses via \eqref{eq:reparam}
+\For{$n=1,\ldots,E_1$ (Adam)}
+    \State Forward pass: $V\leftarrow V_{\boldsymbol{w}}(\mathbf{x}_f)$; AD for first/second derivatives ($V_{Sv}$ too for Heston)
+    \State $\mathcal{R}\leftarrow$ strong-form residual of \eqref{eq:bs_pde}/\eqref{eq:heston_pde}; assemble $\mathcal{L}_{\mathrm{pde,ic,bc}}$, plus $\mathcal{L}_{\mathrm{data}},\mathcal{L}_{\mathrm{Feller}}$ if inverse
+    \State Backpropagate; clip $\|g\|_2\le 1$; Adam step with $\eta_n$
+\EndFor
+\For{$n=1,\ldots,E_2$ (LBFGS, inverse only)}
+    \State closure: zero grads, recompute $\mathcal{L}$, backprop \emph{without} clipping; strong-Wolfe step
+\EndFor
+\State \Return $V_{\boldsymbol{w}}$ (and calibrated $\kappa,\theta,\xi,\rho$ if inverse)
+\end{algorithmic}
+\end{algorithm}
 
 \begin{table}[!htbp]
     \centering
-    \small
-    \setlength{\tabcolsep}{4pt}
-    \renewcommand{\arraystretch}{1.18}
-    \caption{Greeks computed from the trained PINN price function. Black--Scholes sensitivities are written with respect to the constant volatility parameter $\sigma$; Heston sensitivities are written with respect to the variance state $v$. Rows marked ``BS$^\star$'' require a parametric PINN with $\sigma,r,q$ as inputs and are not directly accessible from the non-parametric network used here.}
-    \label{tab:greeks_expressions}
-    \begin{tabularx}{\linewidth}{@{} l X c c @{}}
+    \footnotesize
+    \setlength{\tabcolsep}{3pt}
+    \renewcommand{\arraystretch}{1.1}
+    \caption{Final PINN configurations from the hyperparameter sweeps of \cref{section:result}. All networks are scalar-output MLPs with constant width $256$. LR is the Adam base value; $\eta_{\min}=10^{-6}$ for all three.}
+    \label{tab:nn_architectures}
+    \begin{tabularx}{\linewidth}{@{} l X X X @{}}
         \toprule
-        \textbf{Greek} & \textbf{Expression} & \textbf{Order} & \textbf{Model} \\
+        & \textbf{BS} & \textbf{Heston} & \textbf{Inverse} \\
         \midrule
-
-        \multicolumn{4}{@{}l}{\textbf{Price level}} \\
-        Price          & $V$                                  & --   & BS/HS \\
-
-        \addlinespace[0.25em]
-        \multicolumn{4}{@{}l}{\textbf{First-order sensitivities}} \\
-        Delta $(\Delta)$ & $\partial V / \partial S$           & 1st  & BS/HS \\
-        Theta $(\Theta)$ & $\partial V / \partial \tau$        & 1st  & BS/HS \\
-        Rho $(\rho_r)$   & $\partial V / \partial r$           & 1st  & BS$^\star$ \\
-        Phi $(\Phi)$     & $\partial V / \partial q$           & 1st  & BS$^\star$ \\
-        Vega             & $\partial V / \partial \sigma$      & 1st  & BS$^\star$ \\
-        Vega$_v$         & $\partial V / \partial v$           & 1st  & HS \\
-
-        \addlinespace[0.25em]
-        \multicolumn{4}{@{}l}{\textbf{Second-order sensitivities}} \\
-        Gamma $(\Gamma)$ & $\partial^2 V / \partial S^2$       & 2nd  & BS/HS \\
-        Vomma            & $\partial^2 V / \partial \sigma^2$  & 2nd  & BS$^\star$ \\
-        Volga$_v$        & $\partial^2 V / \partial v^2$       & 2nd  & HS \\
-        Vanna            & $\partial^2 V / \partial S \partial \sigma$ & 2nd & BS$^\star$ \\
-        Vanna$_v$        & $\partial^2 V / \partial S \partial v$      & 2nd & HS \\
-        Charm            & $\partial^2 V / \partial S \partial \tau$   & 2nd & BS/HS \\
-
-        \addlinespace[0.25em]
-        \multicolumn{4}{@{}l}{\textbf{Third-order sensitivities}} \\
-        Speed            & $\partial^3 V / \partial S^3$       & 3rd  & BS/HS \\
-        Zomma            & $\partial^3 V / \partial S^2 \partial \sigma$ & 3rd & BS$^\star$ \\
-        Zomma$_v$        & $\partial^3 V / \partial S^2 \partial v$     & 3rd & HS \\
-        Color            & $\partial^3 V / \partial S^2 \partial \tau$  & 3rd & BS/HS \\
-
-        \addlinespace[0.25em]
-        \multicolumn{4}{@{}l}{\textbf{PDE diagnostic}} \\
-        PDE residual     & $\mathcal{R}_{\boldsymbol{w}}$      & --   & BS/HS \\
-
+        Input $(S,\tau)/(S,v,\tau)$ & 2 & 3 & 3 \\
+        Hidden layers / width      & 2/256 & 3/256 & 3/256 \\
+        Activation / init          & $\tanh$/Xavier & $\tanh$/Xavier & SIREN/Sitzmann \\
+        Optimiser                  & Adam & Adam & Adam + L-BFGS \\
+        Base LR $\eta_0$           & $5\!\times\!10^{-4}$ & $5\!\times\!10^{-3}$ & $2\!\times\!10^{-3}$ NN, $10^{-3}$ Heston \\
+        Epochs                     & $50{,}000$ & $50{,}000$ & $25{,}000$ + $5{,}000$ \\
+        $\lambda_{\mathrm{pde,ic,bc}}$ & $(10,5,5)$ & $(10,10,5)$ & $(20,10,5)$ \\
+        $\lambda_{\mathrm{data,Feller}}$ & --- & --- & $(1000,0.1)$ \\
         \bottomrule
     \end{tabularx}
 \end{table}
 
-\subsection{Collocation data and sampling strategy}\label{subsec:collocation}
+\subsection{Collocation, testing, and Greeks}\label{subsec:collocation}
 
-PINNs are mesh-free, but they are not data-free: their performance depends strongly on where collocation points are sampled \parencite{lu2021deepxde,wang2022expert}. The collocation design therefore determines which regions of the pricing domain are emphasized during training. Since option-price surfaces contain the strongest curvature near the strike and near expiry -- where the kinked payoff $\max(S-K,0)$ propagates a sharp feature backward in $\tau$ -- purely uniform sampling underrepresents precisely the regions that most challenge the network. We use an explicit mixture distribution that combines a uniform background with concentrations near the strike, near expiry, and (for Heston) near the initial variance level.
-
-\subsubsection{Black--Scholes forward problem}
-
-For the Black--Scholes forward problem, the interior collocation set of size $N_f=5000$ is drawn from a three-component mixture:
-\begin{itemize}
-    \item \textbf{60\% uniform background} on the rectangle $[0,S_{\max}]\times[0,T_{\max}]$;
-    \item \textbf{20\% near the strike}, with $S\sim\mathcal{N}(K,(0.2K)^2)$ clipped to $[0,S_{\max}]$ and $\tau$ uniform on $[0,T_{\max}]$;
-    \item \textbf{20\% near expiry}, with $\tau\sim\mathrm{Beta}(0.5,2.0)\cdot T_{\max}$ -- a heavily left-skewed distribution that concentrates samples near the payoff singularity at $\tau=0$ where the curvature is highest -- and $S$ uniform.
-\end{itemize}
-The initial-condition set of size $N_{\mathrm{ic}}=1000$ is a 50/50 mixture of uniform $S$ and $S\sim\mathcal{N}(K,(0.15K)^2)$ clipped to $[0,S_{\max}]$, all at $\tau=0$. Boundary points are split evenly between the lower boundary $S=0$ (where $V=0$ is enforced) and the upper boundary $S=S_{\max}$, each with $\tau$ uniform on $[0,T_{\max}]$. The final BS PINN imposes only the lower-boundary penalty $V(0,\tau)=0$ in $\mathcal{L}_{\mathrm{bc}}$; the upper-boundary points are generated but optional. \Cref{tab:bs_collocation_summary} summarizes the dataset.
-
-\begin{table}[!htbp]
-    \centering
-    \small
-    \setlength{\tabcolsep}{6pt}
-    \renewcommand{\arraystretch}{1.18}
-    \caption{Black--Scholes collocation set summary.}
-    \label{tab:bs_collocation_summary}
-    \begin{tabularx}{\linewidth}{@{} X r @{}}
-        \toprule
-        \textbf{Quantity} & \textbf{Value} \\
-        \midrule
-
-        \multicolumn{2}{@{}l}{\textbf{Collocation points}} \\
-        Interior points $N_f$ (60/20/20 mixture)                & $5000$ \\
-        Initial-condition points $N_{\mathrm{ic}}$ (50/50 mix)  & $1000$ \\
-        Boundary $S=0$                                          & $250$ \\
-        Boundary $S=S_{\max}$                                   & $250$ \\
-
-        \addlinespace[0.25em]
-        \multicolumn{2}{@{}l}{\textbf{Domain}} \\
-        $S$ range & $[0.00,\ 300.00]$ \\
-        $\tau$ range & $[0.00,\ 1.00]$ \\
-
-        \bottomrule
-    \end{tabularx}
-\end{table}
-
-\subsubsection{Heston forward problem}
-
-The Heston forward problem extends the input domain from $(S,\tau)$ to $(S,v,\tau)$ and introduces the mixed-derivative term $\partial^2 V/\partial S\partial v$. To maintain coverage of the enlarged domain, the interior set is doubled to $N_f=10{,}000$ and drawn from a four-component mixture:
-\begin{itemize}
-    \item \textbf{40\% uniform background} on $[0,S_{\max}]\times[v_{\min},v_{\max}]\times[0,T_{\max}]$;
-    \item \textbf{20\% near the strike}, with $S\sim\mathcal{N}(K,(0.2K)^2)$ clipped to $[0,S_{\max}]$;
-    \item \textbf{20\% near expiry}, with $\tau\sim\mathrm{Beta}(0.5,2.0)\cdot T_{\max}$;
-    \item \textbf{20\% near the initial variance}, with $v\sim\mathcal{N}(v_0,(0.3 v_0)^2)$ clipped to $[v_{\min},v_{\max}]$.
-\end{itemize}
-The initial-condition set of size $N_{\mathrm{ic}}=2000$ is again a 50/50 mixture, this time combining uniform $(S,v)$ with samples clustered near the strike in $S$ and near $v_0$ in $v$. The collocation file contains \emph{four} boundary sets of $250$ points each: $S=0$, $S=S_{\max}$, $v=v_{\min}$, and $v=v_{\max}$. However, the final forward Heston PINN imposes only the two asset-price boundaries in $\mathcal{L}_{\mathrm{bc}}$ (with $V(0,v,\tau)=0$ at the lower boundary), because the limiting behavior of $V$ in the variance direction is not a simple zero-value Dirichlet condition. The variance-boundary points are loaded but excluded from the boundary loss; this choice is consistent with the no-arbitrage requirement at $v\to 0$ and the lack of an elementary expression at $v=v_{\max}$.
-
-\begin{table}[!htbp]
-    \centering
-    \small
-    \setlength{\tabcolsep}{6pt}
-    \renewcommand{\arraystretch}{1.18}
-    \caption{Heston collocation set summary. The generated dataset contains four boundary sets, but the final Heston PINN imposes boundary penalties only on the two asset-price boundaries.}
-    \label{tab:hs_collocation_summary}
-    \begin{tabularx}{\linewidth}{@{} X r @{}}
-        \toprule
-        \textbf{Quantity} & \textbf{Value} \\
-        \midrule
-
-        \multicolumn{2}{@{}l}{\textbf{Collocation points used in final training}} \\
-        Interior points $N_f$ (40/20/20/20 mixture)             & $10{,}000$ \\
-        Initial-condition points $N_{\mathrm{ic}}$ (50/50 mix)  & $2000$ \\
-        Boundary $S=0$                                          & $250$ \\
-        Boundary $S=S_{\max}$                                   & $250$ \\
-
-        \addlinespace[0.25em]
-        \multicolumn{2}{@{}l}{\textbf{Generated but not imposed in final boundary loss}} \\
-        Boundary $v=v_{\min}$                                   & $250$ \\
-        Boundary $v=v_{\max}$                                   & $250$ \\
-
-        \addlinespace[0.25em]
-        \multicolumn{2}{@{}l}{\textbf{Domain}} \\
-        $S$ range & $[0.00,\ 300.00]$ \\
-        $v$ range & $[0.01,\ 1.00]$ \\
-        $\tau$ range & $[0.00,\ 1.00]$ \\
-
-        \bottomrule
-    \end{tabularx}
-\end{table}
-
-\subsubsection{Heston inverse problem}
-
-For the inverse calibration problem the training set combines the same physics collocation distribution as the forward Heston PINN with an additional $N_m=200$ noisy market observations. The market points are generated by sampling $(S,v,\tau)$ from the interior distribution, evaluating the semi-analytical Heston call price \eqref{eq:heston_cf_price} at the true parameters, and adding i.i.d.\ Gaussian noise of standard deviation $0.5$ to the resulting prices. The variance boundaries are again \emph{not} imposed in the boundary loss, and in fact for the inverse model only the single lower asset-price boundary $S=0$ enters $\mathcal{L}_{\mathrm{bc}}$, the rationale being that the calibration signal at $S=S_{\max}$ is implicitly carried by both the PDE residual and the market-price observations. \Cref{tab:inverse_collocation_summary} summarizes the dataset.
-
-\begin{table}[!htbp]
-    \centering
-    \small
-    \setlength{\tabcolsep}{6pt}
-    \renewcommand{\arraystretch}{1.18}
-    \caption{Inverse-problem dataset summary. The boundary points at $S=S_{\max}$ and at $v=v_{\min}, v=v_{\max}$ are generated but not imposed in the final inverse boundary loss.}
-    \label{tab:inverse_collocation_summary}
-    \begin{tabularx}{\linewidth}{@{} X r @{}}
-        \toprule
-        \textbf{Quantity} & \textbf{Value} \\
-        \midrule
-
-        \multicolumn{2}{@{}l}{\textbf{Collocation points}} \\
-        Interior points $N_f$               & $10{,}000$ \\
-        Initial-condition points $N_{\mathrm{ic}}$ & $2000$ \\
-        Boundary $S=0$ (imposed)            & $250$ \\
-        Boundary $S=S_{\max}$ (generated)   & $250$ \\
-        Boundary $v=v_{\min}$ (generated)   & $250$ \\
-        Boundary $v=v_{\max}$ (generated)   & $250$ \\
-        Market-data points $N_m$            & $200$ \\
-
-        \addlinespace[0.25em]
-        \multicolumn{2}{@{}l}{\textbf{Collocation domain}} \\
-        $S$ range   & $[0.00,\ 300.00]$ \\
-        $v$ range   & $[0.01,\ 1.00]$ \\
-        $\tau$ range & $[0.00,\ 1.00]$ \\
-
-        \addlinespace[0.25em]
-        \multicolumn{2}{@{}l}{\textbf{Market-data observation domain}} \\
-        Market $S$ range   & $[51.32,\ 249.55]$ \\
-        Market $v$ range   & $[0.0111,\ 0.4990]$ \\
-        Market $\tau$ range & $[0.0529,\ 0.9970]$ \\
-        Market $V$ range   & $[0.0000,\ 152.8329]$ \\
-        Noise std. $\sigma_{\mathrm{noise}}$ & $0.5$ \\
-
-        \bottomrule
-    \end{tabularx}
-\end{table}
-
-\subsection{Implementation and computational environment}\label{subsec:compute}
-
-The complete pipeline is implemented in Python and PyTorch \parencite{paszke2019pytorch,pytorch_docs}, with reverse-mode automatic differentiation \parencite{baydin2018automatic} as the only differentiation primitive. The code base is organised as a small set of orthogonal modules: \texttt{sample.py} (collocation generation), \texttt{activations.py} (smooth-activation library and matched initializers), \texttt{bspinn.py}, \texttt{hspinn.py}, and \texttt{invpinn.py} (the three network classes and their loss assemblies), and the corresponding driver notebooks \texttt{notebook\_pinn\_bs.ipynb}, \texttt{notebook\_pinn\_hs.ipynb}, and \texttt{notebook\_pinn\_inv.ipynb}. Each notebook performs three stages in a fixed sequence: load a pre-sampled collocation dataset, instantiate the model and optimizer on the GPU, and run the Adam (and, for the inverse problem, L-BFGS) loop while logging per-component losses every $500$ epochs. The full implementation is open-source \parencite{furnes2026fys5429code,furnes2026fys5429overleaf}.
-
-\paragraph{Why a GPU was unavoidable.} Each training step of the Heston PINN evaluates the network and the residual of \cref{eq:heston_pde} at all $10{,}000$ interior collocation points; this requires one forward pass plus six backward passes (for $V_S$, $V_v$, $V_\tau$, $V_{SS}$, $V_{vv}$, $V_{Sv}$), giving an effective cost per epoch of approximately $7\times 10^4$ dense-network evaluations. At $50{,}000$ epochs the model performs $\mathcal{O}(3.5\times 10^{9})$ such evaluations, plus the $\mathcal{O}(50^{2})$ Jacobian-vector products implicit in the higher-order AD graph. On a single CPU core this would take several days; on a modern Tensor Core GPU \parencite{markidis2018tensor} it takes minutes. NVIDIA's H100 Hopper architecture \parencite{nvidia_h100,choquette2023nvidia} is particularly well matched to the workload because batched dense linear algebra in float32 dominates the runtime and maps directly onto its Tensor Cores.
-
-\paragraph{Hardware and platform.} All production training runs were executed on cloud-hosted GPU runtimes in Google Colab \parencite{google_colab_faq,bisong2019colab}, primarily NVIDIA H100 instances \parencite{nvidia_h100} for the Black--Scholes and inverse experiments and NVIDIA A100 \parencite{nvidia_a100} for the Heston run. Local execution on a consumer CPU was attempted during initial debugging but was not viable for the final $50{,}000$-epoch runs: the per-epoch cost of the second-order AD graph made even one full training pass an overnight job, and the hyperparameter sweeps (more than $90$ short runs in total, see \cref{subsec:results-runtime}) would have been impractical to complete on the project timeline. The Colab H100/A100 backend was therefore not a convenience -- it was a precondition for the experiments reported here.
-
-\paragraph{Per-experiment runtimes.} The final training durations, read directly from the recorded notebook outputs, are summarised in \cref{tab:runtime_summary}. The cumulative wall-clock budget for the entire project, including the nine hyperparameter sweeps reported in the Results section, is approximately $4.1$ hours of dedicated H100/A100 time. This is reported transparently to support the reproducibility of the experiments and to give a realistic picture of the cost of PINN training at this scale.
+Collocation points are drawn from a mixture distribution combining a uniform background with concentrations near the strike, near expiry, and (for Heston) near the initial variance level, since the kinked payoff $\max(S-K,0)$ propagates the strongest curvature backward from $\tau=0$ \parencite{lu2021deepxde,wang2022expert}. \Cref{tab:collocation} summarises the three datasets used in this project. For the forward Heston network the boundary loss imposes both $V(0,v,\tau)=0$ and the upper Dirichlet $V(S_{\max},v,\tau)\approx S_{\max}-Ke^{-r\tau}$; for the inverse network only the lower boundary $S=0$ is enforced, the upper-$S$ and variance edges being absorbed by the price-data signal.
 
 \begin{table}[!htbp]
     \centering
     \footnotesize
     \setlength{\tabcolsep}{4pt}
-    \renewcommand{\arraystretch}{1.15}
-    \caption{Production training runtimes on Google Colab GPU backends. Times are wall-clock as logged by the training notebooks; ``H100'' and ``A100'' refer to NVIDIA Tensor Core accelerators \parencite{nvidia_h100,nvidia_a100,choquette2023nvidia}. The hyperparameter sweeps row aggregates all four BS sweeps, four Heston sweeps, and the inverse-data sweep.}
-    \label{tab:runtime_summary}
-    \begin{tabularx}{\linewidth}{@{} l X r r @{}}
+    \renewcommand{\arraystretch}{1.05}
+    \caption{Collocation and data sets for the three experiments. Domain is $S\in[0,300]$, $\tau\in[0,1]$, $v\in[0.01,1]$.}
+    \label{tab:collocation}
+    \begin{tabularx}{\linewidth}{@{} X r r r @{}}
         \toprule
-        \textbf{Experiment} & \textbf{Backend} & \textbf{Epochs} & \textbf{Time} \\
+        \textbf{Set} & \textbf{BS} & \textbf{Heston} & \textbf{Inverse} \\
         \midrule
-        BS final            & H100              & $50{,}000$       & 12 m 08 s \\
-        Heston final        & A100              & $50{,}000$       & 24 m 40 s \\
-        Inverse final       & H100              & $25{,}000$+$5{,}000$ & 16 m 17 s \\
-        \addlinespace[0.2em]
-        BS hyper sweeps     & H100              & $49$ runs        & 41 m 02 s \\
-        Heston hyper sweeps & A100              & $48$ runs        & 132 m 10 s \\
-        Inverse hyper sweep & H100              & $3$ runs         & 19 m 22 s \\
-        \midrule
-        \textbf{Total}      &                   &                  & $\approx 4.1$ h \\
+        Interior $N_f$           & $5{,}000$  & $10{,}000$ & $10{,}000$ \\
+        IC $N_{\mathrm{ic}}$ ($\tau=0$) & $1{,}000$ & $2{,}000$  & $2{,}000$  \\
+        BC at $S=0$ (imposed)    & $250$ & $250$ & $250$ \\
+        BC at $S=S_{\max}$       & --- & $250$ & --- \\
+        Market data $N_m$        & --- & --- & $200$ (noise $\sigma_n{=}0.5$) \\
         \bottomrule
     \end{tabularx}
 \end{table}
 
-\paragraph{Software stack and tooling.} The numerical stack is PyTorch \parencite{paszke2019pytorch,pytorch_docs} for the neural-network and AD layer, NumPy and SciPy for collocation sampling and the Heston characteristic-function quadrature (\texttt{scipy.integrate.quad}), and Matplotlib for figures. Local development and debugging were performed on a personal Windows workstation in Visual Studio Code \parencite{vscode}. AI-assisted coding tools \parencite{cursor,google_antigravity,anthropic_claude_code} were used in a supporting role for code navigation, refactoring, and \LaTeX{} formatting only; the model selection, numerical experiments, interpretation of results, and final responsibility for the manuscript remain with the author.
+Each trained PINN is validated against four exit criteria. \emph{(i) Closed-form Black--Scholes benchmark.} With $K=100,r=0.05,\sigma=0.2$, the analytical call $C=SN(d_1)-Ke^{-r\tau}N(d_2)$ with $d_1=[\ln(S/K)+(r+\tfrac{1}{2}\sigma^2)\tau]/(\sigma\sqrt{\tau})$, $d_2=d_1-\sigma\sqrt{\tau}$ \parencite{black1973pricing} gives $C=6.888729$ at the at-the-money point $(S,\tau)=(100,0.5)$ and is used pointwise in the absolute-error figures. \emph{(ii) Semi-analytical Heston benchmark.} Equations \eqref{eq:heston_cf_price}--\eqref{eq:heston_pj} are evaluated by adaptive Gauss--Kronrod quadrature on the truncated frequency interval $[10^{-4},100]$, with the integrand expressed in non-discounted characteristic form and an early-payoff branch for $\tau\le 10^{-4}$ to avoid the $1/(i\phi)$ singularity. Faster alternatives -- the FFT method of \textcite{carr1999fft}, the COS expansion of \textcite{fang2008cos}, and the ``little Heston trap'' regularisation of \textcite{albrecher2007heston} -- agree to within $10^{-6}$ but were not needed at the grid sizes used here. \emph{(iii) Put--call parity.} The trained call surface combined with $C-P=S-Ke^{-r\tau}$ implies a put surface; deviations from the analytical put price remain below $10^{-2}$ at the at-the-money point. \emph{(iv) AD versus finite differences.} Reverse-mode AD derivatives at the evaluation point agree with $h=10^{-3}$ central differences for $V_S, V_{SS}, V_{Sv}$ to four significant figures, ruling out a wrong-residual bug. An independent $10^5$-path Monte Carlo cross-check \parencite{glasserman2003monte} using the log-Euler GBM scheme and the reflection-Euler Heston scheme of \textcite{andersen2008simple,lord2010comparison} reproduced both references to within statistical noise; these are not reported separately because they reproduce the benchmarks to within Monte Carlo error, but they protect the evaluation against systematic bugs in either reference.
 
-\paragraph{Reproducibility.} All production runs use PyTorch 2.x with CUDA 12.x on Google Colab's hosted Linux images, fix the Python, NumPy and PyTorch random seeds to $42$ before tensorisation, and store the trained model state, the recorded loss history, and the collocation parquet files alongside the report. The exact training cell outputs (including the per-experiment wall-clock figures in \cref{tab:runtime_summary}, the version banners, and the captured GPU identifier) are preserved as Markdown exports in the \texttt{exports/} directory of the manuscript repository \parencite{furnes2026fys5429overleaf}, and the source code in the companion repository \parencite{furnes2026fys5429code} carries a permanent commit hash for each experiment so that the same trained models can be reconstructed end-to-end from raw data.
+Greeks are obtained directly by differentiating the trained surrogate, with no bump-and-revalue. \Cref{tab:greeks_expressions} lists every sensitivity computed in this project. For the Black--Scholes PINN, only $(S,\tau)$-derivatives are accessible by AD: Delta, Theta, Gamma, Charm, Speed, and Color. Volatility/rate Greeks (Vega, Vomma, Vanna, $\rho_r$, $\Phi$) require a \emph{parametric} PINN with $\sigma,r,q$ as additional inputs and are reported as N/A from the present non-parametric network \parencite{lewis2025pinnsoptions}. For the Heston PINN $v$ is already an input, so the variance sensitivities Vega$_v$, Volga$_v$, Vanna$_v$, Zomma$_v$ are likewise available by AD; these should be read as variance-state sensitivities rather than direct Black--Scholes volatility sensitivities.
+
+\begin{table}[!htbp]
+    \centering
+    \footnotesize
+    \setlength{\tabcolsep}{3pt}
+    \renewcommand{\arraystretch}{1.05}
+    \caption{Greeks computed by reverse-mode AD on the trained PINN. BS$^\star$ marks Greeks that would require a parametric BS-PINN with $\sigma,r,q$ as inputs.}
+    \label{tab:greeks_expressions}
+    \begin{tabularx}{\linewidth}{@{} l X c c @{}}
+        \toprule
+        \textbf{Greek} & \textbf{Expression} & \textbf{Ord.} & \textbf{Model} \\
+        \midrule
+        Delta $\Delta$       & $\partial V/\partial S$               & 1 & BS/HS \\
+        Theta $\Theta$       & $\partial V/\partial \tau$            & 1 & BS/HS \\
+        Vega$_v$             & $\partial V/\partial v$               & 1 & HS \\
+        Rho $\rho_r$         & $\partial V/\partial r$               & 1 & BS$^\star$ \\
+        Phi $\Phi$           & $\partial V/\partial q$               & 1 & BS$^\star$ \\
+        Vega                 & $\partial V/\partial \sigma$          & 1 & BS$^\star$ \\
+        Gamma $\Gamma$       & $\partial^2 V/\partial S^2$           & 2 & BS/HS \\
+        Vomma                & $\partial^2 V/\partial \sigma^2$      & 2 & BS$^\star$ \\
+        Volga$_v$            & $\partial^2 V/\partial v^2$           & 2 & HS \\
+        Vanna                & $\partial^2 V/\partial S\partial\sigma$ & 2 & BS$^\star$ \\
+        Vanna$_v$            & $\partial^2 V/\partial S\partial v$   & 2 & HS \\
+        Charm                & $\partial^2 V/\partial S\partial \tau$ & 2 & BS/HS \\
+        Speed                & $\partial^3 V/\partial S^3$           & 3 & BS/HS \\
+        Color                & $\partial^3 V/\partial S^2\partial\tau$ & 3 & BS/HS \\
+        Zomma$_v$            & $\partial^3 V/\partial S^2\partial v$ & 3 & HS \\
+        \bottomrule
+    \end{tabularx}
+\end{table}
+
+\subsection{Computational environment}\label{subsec:compute}
+
+All production training was executed on Google Colab GPU runtimes \parencite{google_colab_faq}: NVIDIA H100 \parencite{nvidia_h100,choquette2023nvidia} for the Black--Scholes and inverse experiments, NVIDIA A100 \parencite{nvidia_a100} for the Heston run. Each Heston training step evaluates the network and the residual of \eqref{eq:heston_pde} at $10{,}000$ interior collocation points using one forward and six backward AD passes, giving $\mathcal{O}(7\times 10^4)$ dense-network evaluations per epoch and $\mathcal{O}(3.5\times 10^{9})$ over the full $50{,}000$-epoch run -- a CPU job of several days that maps onto the Tensor Cores of \parencite{markidis2018tensor,nvidia_h100} in minutes. \Cref{tab:runtime_summary} reports wall-clock times. All runs fix Python, NumPy, and PyTorch seeds to $42$; the trained checkpoints, the loss histories, and the collocation parquet files are stored in the companion repositories \parencite{furnes2026fys5429code,furnes2026fys5429overleaf}.
+
+\begin{table}[!htbp]
+    \centering
+    \footnotesize
+    \setlength{\tabcolsep}{4pt}
+    \renewcommand{\arraystretch}{1.08}
+    \caption{Wall-clock training times on Colab Tensor-Core backends. Hyperparameter sweeps aggregate four BS sweeps, four Heston sweeps, and the inverse data sweep.}
+    \label{tab:runtime_summary}
+    \begin{tabularx}{\linewidth}{@{} l l r r @{}}
+        \toprule
+        \textbf{Experiment} & \textbf{GPU} & \textbf{Epochs} & \textbf{Time} \\
+        \midrule
+        BS final            & H100 & $50{,}000$ & 12 m 08 s \\
+        Heston final        & A100 & $50{,}000$ & 24 m 40 s \\
+        Inverse final       & H100 & $25{,}000$+$5{,}000$ & 16 m 17 s \\
+        BS sweeps           & H100 & $49$ runs & 41 m 02 s \\
+        Heston sweeps       & A100 & $48$ runs & 132 m 10 s \\
+        Inverse sweep       & H100 & $3$ runs  & 19 m 22 s \\
+        \midrule
+        \textbf{Total}      &      &           & $\approx 4.1$ h \\
+        \bottomrule
+    \end{tabularx}
+\end{table}

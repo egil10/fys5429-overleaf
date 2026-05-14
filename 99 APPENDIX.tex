@@ -155,8 +155,8 @@
 
 \noindent\footnotesize
 \textbf{Notes for Tables~\ref{tab:bs_training_loss_history}--\ref{tab:inverse_pinn_calibration_history}.}
-\textbf{(BS)} 50000 epochs in 12\,min 8\,s; 6250 points (5000 interior, 1000 IC, 250 BC); final total loss $0.102625$. Adam with $\eta_0=10^{-3}$, cosine-annealing \parencite{loshchilov2017sgdr} to $\eta_{\min}=10^{-6}$, gradient-norm clipping at $1.0$ \parencite{pascanu2013difficulty}, and loss weights $(\lambda_{\text{PDE}},\lambda_{\text{IC}},\lambda_{\text{BC}})=(10,5,5)$.
-\textbf{(Heston)} 50000 epochs in 24\,min 40\,s; 12500 points (10000 interior, 2000 IC, 250 lower-$S$ BC, 250 upper-$S$ BC); final total loss $0.921236$. Same optimizer schedule with $(\lambda_{\text{PDE}},\lambda_{\text{IC}},\lambda_{\text{BC}})=(10,10,5)$ and a 3-layer, 256-neuron \texttt{tanh} network.
+\textbf{(BS)} 50000 epochs in 12\,min 8\,s; 6250 points (5000 interior, 1000 IC, 250 BC); final total loss $0.102625$. Adam with $\eta_0=5\times 10^{-4}$, cosine-annealing \parencite{loshchilov2017sgdr} to $\eta_{\min}=10^{-6}$, gradient-norm clipping at $1.0$ \parencite{pascanu2013difficulty}, and loss weights $(\lambda_{\text{PDE}},\lambda_{\text{IC}},\lambda_{\text{BC}})=(10,5,5)$.
+\textbf{(Heston)} 50000 epochs in 24\,min 40\,s; 12500 points (10000 interior, 2000 IC, 250 lower-$S$ BC, 250 upper-$S$ BC); final total loss $0.921236$. Same optimizer schedule with $\eta_0=5\times 10^{-3}$, $(\lambda_{\text{PDE}},\lambda_{\text{IC}},\lambda_{\text{BC}})=(10,10,5)$, and a 3-layer, 256-neuron \texttt{tanh} network.
 \textbf{(Inverse)} 30000 epochs in 16\,min 17\,s (25000 Adam + 5000 L-BFGS \parencite{liu1989limited}); final losses --- total $17.3094$, PDE $0.533012$, data $0.0030$; final calibrated $\kappa=1.588$, $\theta=0.0266$, $\xi=0.104$, $\rho=0.994$, with true generating values $\kappa=2.0$, $\theta=0.04$, $\xi=0.3$, $\rho=-0.7$.
 \normalsize
 
@@ -227,7 +227,7 @@ The training curves below resolve the convergence dynamics behind the ranked sum
     \begin{subfigure}[t]{0.49\linewidth}
         \centering
         \includegraphics[width=\linewidth]{figures/hyper_bs_lr_curves.pdf}
-        \caption{Training curves for the tested Black--Scholes learning rates. Curves at $\eta_0\ge 5\times 10^{-3}$ exhibit persistent oscillations even with gradient clipping \parencite{pascanu2013difficulty}, while $\eta_0\in[5\times 10^{-4},2\times 10^{-3}]$ produces monotonic decay; $\eta_0=10^{-3}$ was selected for the final run.}
+        \caption{Training curves for the tested Black--Scholes learning rates. Curves at $\eta_0\ge 3\times 10^{-3}$ exhibit persistent oscillations even with gradient clipping \parencite{pascanu2013difficulty}, while $\eta_0\in[3\times 10^{-4},10^{-3}]$ produces monotonic decay; $\eta_0=5\times 10^{-4}$ was selected for the final run.}
         \label{fig:hyper_bs_lr_curves.pdf}
     \end{subfigure}
 
@@ -300,7 +300,7 @@ The four panels show the per-component loss decomposition of the final 50{,}000-
 
 \clearpage\subsection{Heston PINN}
 
-The Heston PINN was selected from analogous sweeps over depth/width/activation, learning rate, $\lambda$ triples, and epoch budget on the three-dimensional $(S,v,\tau)$ collocation grid. The best configuration uses three hidden layers of 256 \texttt{tanh} neurons with $(\lambda_{\text{PDE}},\lambda_{\text{IC}},\lambda_{\text{BC}})=(10,10,5)$ and $\eta_0=10^{-3}$ under the same cosine-annealing schedule \parencite{loshchilov2017sgdr}. The per-component loss curves below show the corresponding 50{,}000-epoch run, with the larger Heston state space producing markedly noisier early-training transients than the Black--Scholes case.
+The Heston PINN was selected from analogous sweeps over depth/width/activation, learning rate, $\lambda$ triples, and epoch budget on the three-dimensional $(S,v,\tau)$ collocation grid. The best configuration uses three hidden layers of 256 \texttt{tanh} neurons with $(\lambda_{\text{PDE}},\lambda_{\text{IC}},\lambda_{\text{BC}})=(10,10,5)$ and $\eta_0=5\times 10^{-3}$ under the same cosine-annealing schedule \parencite{loshchilov2017sgdr}. The per-component loss curves below show the corresponding 50{,}000-epoch run, with the larger Heston state space producing markedly noisier early-training transients than the Black--Scholes case.
 
 \begin{figure}[H]
     \centering
@@ -347,7 +347,7 @@ The Heston PINN was selected from analogous sweeps over depth/width/activation, 
 
 \clearpage\subsection{Inverse PINN}
 
-The inverse PINN was trained on a synthetic Heston dataset of 200 noisy price observations spread across the $(S,v,\tau)$ domain, with the four Heston parameters reparameterized via softplus/\texttt{tanh} (Listing~\ref{lst:invpinn_reparam}). Optimization used Adam for 25{,}000 epochs followed by 5{,}000 L-BFGS \parencite{liu1989limited} refinement steps, with $(\lambda_{\text{PDE}},\lambda_{\text{IC}},\lambda_{\text{BC}},\lambda_{\text{data}},\lambda_{\text{Feller}})=(20,10,5,1000,0.1)$ and a separate Heston-parameter learning rate $\eta_{\text{Heston}}=10^{-3}$. The two figures below trace the loss decomposition and the parameter trajectories; the final calibrated values $(\kappa,\theta,\xi,\rho)=(1.588,0.0266,0.104,0.994)$ should be compared with the data-generating truth $(2.0,0.04,0.3,-0.7)$ from Table~\ref{tab:inverse_pinn_calibration_history}.
+The inverse PINN was trained on a synthetic Heston dataset of 200 noisy price observations spread across the $(S,v,\tau)$ domain, with the four Heston parameters reparameterized via softplus/\texttt{tanh} (Listing~\ref{lst:reparam}). Optimization used Adam for 25{,}000 epochs followed by 5{,}000 L-BFGS \parencite{liu1989limited} refinement steps, with $(\lambda_{\text{PDE}},\lambda_{\text{IC}},\lambda_{\text{BC}},\lambda_{\text{data}},\lambda_{\text{Feller}})=(20,10,5,1000,0.1)$, NN learning rate $\eta_0=2\times 10^{-3}$, and a separate Heston-parameter learning rate $\eta_{\text{Heston}}=10^{-3}$. The two figures below trace the loss decomposition and the parameter trajectories; the final calibrated values $(\kappa,\theta,\xi,\rho)=(1.588,0.0266,0.104,0.994)$ should be compared with the data-generating truth $(2.0,0.04,0.3,-0.7)$ from Table~\ref{tab:inverse_pinn_calibration_history}.
 
 \begin{figure}[H]
     \centering

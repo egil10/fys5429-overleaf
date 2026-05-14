@@ -7,6 +7,7 @@
 \usepackage[margin=0.7in,columnsep=0.25in]{geometry}
 \usepackage[english]{babel}
 \usepackage{microtype}
+\usepackage{ragged2e}
 
 \setlength{\parindent}{0pt}
 \setlength{\parskip}{3pt}
@@ -28,11 +29,6 @@
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 \usepackage{mathtools,amssymb,bm}
-
-% Dirac notation
-\newcommand{\ket}[1]{\left| #1 \right\rangle}
-\newcommand{\bra}[1]{\left\langle #1 \right|}
-\newcommand{\braket}[2]{\left\langle #1 \middle| #2 \right\rangle}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%% FIGURES & FLOATS %%%%%%%%%
@@ -115,8 +111,6 @@
 
 \captionsetup{figurename=Figure}
 
-\usepackage{subcaption}
-
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%% REFERENCES %%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -129,9 +123,6 @@ maxbibnames=99
 ]{biblatex}
 \addbibresource{bib.bib}
 \renewcommand*{\bibfont}{\small}
-
-\usepackage[backend=biber, style=authoryear]{biblatex}
-\addbibresource{bib.bib}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%% LINKS & REFS %%%%%%%%%%%%%
