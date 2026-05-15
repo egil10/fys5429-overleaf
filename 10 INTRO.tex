@@ -20,13 +20,6 @@ The classical Black--Scholes model \parencite{black1973pricing,merton1973rationa
 \end{align}
 which is continuous but not differentiable at the strike (\cref{fig:black2d.pdf}). This kink is a localised singularity in curvature that must be propagated backward through the smoothing PDE. \Cref{fig:black3d.pdf} shows the resulting surface: smooth for $\tau>0$, with the kinked terminal cross-section at $\tau=0$.
 
-\begin{figure*}[t]
-    \centering
-    \includegraphics[width=0.95\textwidth]{figures/black3d.pdf}
-    \caption{Black--Scholes option-price surfaces over asset price and time to maturity. The terminal payoff kink is smoothed backward in time by the diffusion structure of the PDE, producing a continuous continuation-value surface.}
-    \label{fig:black3d.pdf}
-\end{figure*}
-
 This project investigates Physics-Informed Neural Networks (PINNs) as mesh-free solvers for option-pricing PDEs. Introduced by \textcite{raissi2019physics}, building on \parencite{raissi2017physics1}, PINNs embed the governing differential equation directly into the training objective of a neural network: the network is penalised whenever its output violates the PDE, boundary conditions, or terminal payoff, so the learned function is constrained to behave like a solution of the underlying financial model rather than merely interpolating prices. 
 
 The methodology has matured into an active subfield of scientific machine learning, with recent reviews \parencite{karniadakis2021physics,cuomo2022scientific} and dedicated software libraries \parencite{lu2021deepxde}. Its theoretical backbone is the use of a neural network as a universal function approximator \parencite{cybenko1989approximation,hornik1989multilayer,pinkus1999approximation}; modern mathematical treatments of deep learning \parencite{jentzen2023mathintro,grohs2023mathematical,berner2021modern} provide rigorous foundations, and convergence/generalisation analyses tailored to PINNs on parabolic problems are emerging \parencite{shin2020convergence,mishra2022estimates}.
@@ -43,6 +36,13 @@ The objectives of this project are therefore threefold.
     \item Extend the same framework to the three-dimensional Heston stochastic-volatility PDE and evaluate it against a semi-analytical Fourier-quadrature reference.
     \item Adapt the Heston PINN to an inverse setting in which latent model parameters are recovered from noisy synthetic market prices.
 \end{enumerate}
+
+\begin{figure*}[t]
+    \centering
+    \includegraphics[width=0.95\textwidth]{figures/black3d.pdf}
+    \caption{Black--Scholes option-price surfaces over asset price and time to maturity. The terminal payoff kink is smoothed backward in time by the diffusion structure of the PDE, producing a continuous continuation-value surface.}
+    \label{fig:black3d.pdf}
+\end{figure*}
 
 The main quantitative findings are as follows. The Black--Scholes PINN reproduces the analytical price surface with a relative error of $\approx 0.56\%$ at the at-the-money point ($V_{\mathrm{PINN}}=6.927$ versus $V_{\mathrm{BS}}=6.889$) and a local PDE residual of order $10^{-3}$. The Heston PINN, trained on a three-dimensional $(S,v,\tau)$ domain with the mixed-derivative term included, attains $V_{\mathrm{PINN}}=6.807$ against the semi-analytical Heston benchmark $V_{\mathrm{Heston}}=6.837$, a relative error of $\approx 0.44\%$. The inverse Heston PINN fits $200$ noisy synthetic option prices with $R^2\approx 1.000$ and median relative pricing error $\approx 0.02\%$, but recovers the structural parameters $(\kappa,\theta,\xi,\rho)$ only partially. Most strikingly, the Brownian correlation $\rho$ converges to a large positive value despite the true value being $\rho=-0.7$. This is the central pedagogical finding of the project: a near-perfect price fit does not imply structural parameter recovery, because $\rho$ enters the Heston PDE only through the mixed term $\rho\xi vS V_{Sv}$ and is therefore identifiable from prices only through implied-volatility skew that $200$ scattered points cannot carry.
 
